@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"log"
 	"time"
 
@@ -38,23 +37,34 @@ func main() {
 		Level: compress.LevelBestSpeed,
 	}))
 	app.Use(logger.New())
+
+	app.Get("/", func(c fiber.Ctx) error {
+		return c.SendString("Super App Chonburi API is running...")
+	})
 	
 	app.Use(cors.New(cors.Config{
-		AllowOrigins: []string{"*"},
-		AllowHeaders: []string{"Origin", "Content-Type", "Accept", "Authorization"},
-		AllowMethods: []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowOrigins:     []string{"http://localhost:3000"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization"},
+		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowCredentials: true,
 	}))
 
 	adminRepo := repository.NewAdminRepository(database.DB)
+	muniRepo := repository.NewMunicipalityRepository(database.DB)
+
 	authUC := usecase.NewAuthUseCase(adminRepo)
+	muniUC := usecase.NewMunicipalityUseCase(muniRepo)
+
 	authHandler := delivery.NewAuthHandler(authUC)
+	muniHandler := delivery.NewMunicipalityHandler(muniUC)
 
 	authHandler.RegisterRoutes(app)
+	muniHandler.RegisterRoutes(app)
 
 	port := ":" + cfg.AppPort
-	fmt.Printf("🚀 Go API Backend (Fiber v3) is running on http://localhost%s\n", port)
+	log.Printf("🚀 Server is starting on http://localhost%s", port)
 	
 	if err := app.Listen(port); err != nil {
-		log.Fatalf("could not start server: %v", err)
+		log.Fatalf("Fatal: Could not start server: %v", err)
 	}
 }

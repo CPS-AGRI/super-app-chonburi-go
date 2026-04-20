@@ -8,12 +8,13 @@ import (
 )
 
 type Config struct {
-	AppPort string
-	DBDsn   string
+	AppPort    string
+	DBDsn      string
+	OrgName    string
+	OrgLogoURL string
 }
 
 func LoadConfig() *Config {
-	// Load .env file if it exists, otherwise rely on system ENV variables
 	err := godotenv.Load()
 	if err != nil {
 		log.Println("⚠️  Warning: No .env file found. Falling back to system environment variables.")
@@ -29,8 +30,17 @@ func LoadConfig() *Config {
 		port = "8080"
 	}
 
+	orgName := os.Getenv("ORG_NAME")
+	if orgName == "" {
+		orgName = "องค์การบริหารส่วนจังหวัดชลบุรี"
+	}
+
+	orgLogoURL := os.Getenv("ORG_LOGO_URL")
+
 	return &Config{
-		AppPort: port,
-		DBDsn:   dsn,
+		AppPort:    port,
+		DBDsn:      dsn,
+		OrgName:    orgName,
+		OrgLogoURL: orgLogoURL,
 	}
 }

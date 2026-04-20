@@ -3,11 +3,12 @@ package domain
 import (
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/lib/pq"
 )
 
 type AdminDepartment struct {
-	ID          uint           `gorm:"primaryKey;column:id"`
+	ID          uuid.UUID           `gorm:"type:uuid;primaryKey;default:uuid_generate_v4();column:id" json:"id"`
 	Name        string         `gorm:"unique;column:name"`
 	Description *string        `gorm:"column:description"`
 	IsActive    bool           `gorm:"column:isActive;default:true"`
@@ -23,12 +24,12 @@ func (AdminDepartment) TableName() string {
 }
 
 type Admin struct {
-	ID           uint      `gorm:"primaryKey;column:id"`
+	ID           uuid.UUID      `gorm:"type:uuid;primaryKey;default:uuid_generate_v4();column:id" json:"id"`
 	Email        string    `gorm:"unique;column:email"`
 	Name         string    `gorm:"column:name"`
 	PhoneNumber  string    `gorm:"column:phoneNumber"`
 	PasswordHash string    `gorm:"column:passwordHash"`
-	DepartmentID uint      `gorm:"column:departmentId"`
+	DepartmentID uuid.UUID      `gorm:"type:uuid;column:departmentId"`
 	CreatedAt    time.Time `gorm:"column:createdAt;default:now()"`
 	UpdatedAt    time.Time `gorm:"column:updatedAt"`
 
@@ -37,4 +38,9 @@ type Admin struct {
 
 func (Admin) TableName() string {
 	return "Admin"
+}
+
+type AdminRepository interface {
+	GetByEmail(email string) (*Admin, error)
+	GetByID(id uuid.UUID) (*Admin, error)
 }

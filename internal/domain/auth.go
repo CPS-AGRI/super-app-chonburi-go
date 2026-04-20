@@ -1,10 +1,11 @@
 package domain
 
 type User struct {
-	ID    int    `json:"id"`
-	Email string `json:"email"`
-	Name  string `json:"name"`
-	Role  string `json:"role"` // superadmin, supervisor, employee
+	ID          string   `json:"id"`
+	Email       string   `json:"email"`
+	Name        string   `json:"name"`
+	Role        string   `json:"role"`
+	Permissions []string `json:"permissions"`
 }
 
 type LoginRequest struct {
@@ -15,4 +16,8 @@ type LoginRequest struct {
 type AuthResponse struct {
 	Token string `json:"token"`
 	User  User   `json:"user"`
+}
+
+type AuthUseCase interface {
+	Login(email, password string) (string, User, error)
 }

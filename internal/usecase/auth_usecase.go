@@ -3,61 +3,49 @@ package usecase
 import (
 	"errors"
 	"super-app-chonburi-go/internal/domain"
-	"super-app-chonburi-go/internal/repository"
 	"super-app-chonburi-go/pkg/jwtutil"
 
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
 
-type AuthUseCase interface {
-	Login(req domain.LoginRequest) (*domain.AuthResponse, error)
-}
-
 type authUseCase struct {
-	adminRepo repository.AdminRepository
+	adminRepo domain.AdminRepository
 }
 
-func NewAuthUseCase(adminRepo repository.AdminRepository) AuthUseCase {
+func NewAuthUseCase(adminRepo domain.AdminRepository) domain.AuthUseCase {
 	return &authUseCase{adminRepo: adminRepo}
 }
 
-func (u *authUseCase) Login(req domain.LoginRequest) (*domain.AuthResponse, error) {
-	admin, err := u.adminRepo.GetByEmail(req.Email)
+func (u *authUseCase) Login(email, password string) (string, domain.User, error) {
+	admin, err := u.adminRepo.GetByEmail(email)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, errors.New("user not found")
+			return "", domain.User{}, errors.New("user not found")
 		}
-		return nil, err
+		return "", domain.User{}, err
 	}
 
-	err = bcrypt.CompareHashAndPassword([]byte(admin.PasswordHash), []byte(req.Password))
-	if err != nil {
-		return nil, errors.New("invalid credentials")
+	if err := bcrypt.CompareHashAndPassword([]byte(admin.PasswordHash), []byte(password)); err != nil {
+		return "", domain.User{}, errors.New("invalid credentials")
 	}
 
-	role := "employee"
-	switch admin.Department.Name {
-	case "Super Administration":
-		role = "superadmin"
-	case "Supervisor Team":
-		role = "supervisor"
-	}
+	role := admin.Department.Name
+	permissions := make([]string, len(admin.Department.Permissions))
+	copy(permissions, admin.Department.Permissions)
 
 	user := domain.User{
-		ID:    int(admin.ID),
-		Email: admin.Email,
-		Name:  admin.Name,
-		Role:  role,
+		ID:          admin.ID.String(),
+		Email:       admin.Email,
+		Name:        admin.Name,
+		Role:        role,
+		Permissions: permissions,
 	}
 
 	token, err := jwtutil.GenerateToken(user)
 	if err != nil {
-		return nil, err
+		return "", domain.User{}, err
 	}
 
-	return &domain.AuthResponse{
-		Token: token,
-		User:  user,
-	}, nil
+	return token, user, nil
 }

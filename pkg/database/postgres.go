@@ -34,7 +34,13 @@ func ConnectDB(cfg *config.Config) {
 	sqlDB.SetMaxOpenConns(100)
 	sqlDB.SetConnMaxLifetime(1 * time.Hour)
 
-	err = DB.AutoMigrate(&domain.AdminDepartment{}, &domain.Admin{})
+	DB.Exec("CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\"")
+
+	err = DB.AutoMigrate(
+		&domain.AdminDepartment{},
+		&domain.Admin{},
+		&domain.Municipality{},
+	)
 	if err != nil {
 		log.Fatalf("Fatal: Failed to auto-migrate: %v", err)
 	}
