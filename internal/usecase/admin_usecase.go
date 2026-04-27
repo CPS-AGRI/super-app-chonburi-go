@@ -53,6 +53,15 @@ func (u *adminUseCase) CreateAdmin(admin *domain.Admin) error {
 		return errors.New("password is required")
 	}
 
+	// Map DepartmentIDs to struct slice
+	admin.Departments = make([]domain.Department, len(admin.DepartmentIDs))
+	for i, idStr := range admin.DepartmentIDs {
+		id, err := uuid.Parse(idStr)
+		if err == nil {
+			admin.Departments[i] = domain.Department{ID: id}
+		}
+	}
+
 	return u.adminRepo.Create(admin)
 }
 
@@ -77,8 +86,16 @@ func (u *adminUseCase) UpdateAdmin(admin *domain.Admin) error {
 	existingAdmin.PhoneNumber = admin.PhoneNumber
 	existingAdmin.Position = admin.Position
 	existingAdmin.Status = admin.Status
-	existingAdmin.DepartmentID = admin.DepartmentID
-	existingAdmin.Permissions = admin.Permissions
+	existingAdmin.RoleID = admin.RoleID
+	
+	// Map DepartmentIDs to struct slice
+	existingAdmin.Departments = make([]domain.Department, len(admin.DepartmentIDs))
+	for i, idStr := range admin.DepartmentIDs {
+		id, err := uuid.Parse(idStr)
+		if err == nil {
+			existingAdmin.Departments[i] = domain.Department{ID: id}
+		}
+	}
 
 	if admin.Password != "" {
 		hash, err := bcrypt.GenerateFromPassword([]byte(admin.Password), bcrypt.DefaultCost)
@@ -86,8 +103,6 @@ func (u *adminUseCase) UpdateAdmin(admin *domain.Admin) error {
 			return err
 		}
 		existingAdmin.PasswordHash = string(hash)
-	} else if admin.PasswordHash != "" {
-        existingAdmin.PasswordHash = admin.PasswordHash
 	}
 
 	return u.adminRepo.Update(existingAdmin)

@@ -51,27 +51,31 @@ func main() {
 
 	adminRepo := repository.NewAdminRepository(database.DB)
 	muniRepo := repository.NewMunicipalityRepository(database.DB)
-	adminDepartmentRepo := repository.NewAdminDepartmentRepository(database.DB)
+	adminRoleRepo := repository.NewAdminRoleRepository(database.DB)
 	permissionRepo := repository.NewSystemPermissionRepository(database.DB)
+	deptRepo := repository.NewDepartmentRepository(database.DB)
 
 	authUC := usecase.NewAuthUseCase(adminRepo)
 	muniUC := usecase.NewMunicipalityUseCase(muniRepo)
 	adminUC := usecase.NewAdminUseCase(adminRepo)
-	adminDepartmentUC := usecase.NewAdminDepartmentUseCase(adminDepartmentRepo)
+	adminRoleUC := usecase.NewAdminRoleUseCase(adminRoleRepo)
 	permissionUC := usecase.NewSystemPermissionUseCase(permissionRepo)
+	deptUC := usecase.NewDepartmentUseCase(deptRepo)
 
 	authHandler := delivery.NewAuthHandler(authUC)
 	muniHandler := delivery.NewMunicipalityHandler(muniUC)
 	adminHandler := delivery.NewAdminHandler(adminUC)
-	adminDepartmentHandler := delivery.NewAdminDepartmentHandler(adminDepartmentUC)
+	adminRoleHandler := delivery.NewAdminRoleHandler(adminRoleUC)
 	permissionHandler := delivery.NewSystemPermissionHandler(permissionUC)
+	deptHandler := delivery.NewDepartmentHandler(deptUC)
 
 	api := app.Group("/api/v1")
 	authHandler.RegisterRoutes(app)
 	muniHandler.RegisterRoutes(app)
 	adminHandler.RegisterRoutes(api)
-	adminDepartmentHandler.RegisterRoutes(api)
+	adminRoleHandler.RegisterRoutes(api)
 	permissionHandler.RegisterRoutes(api)
+	deptHandler.RegisterRoutes(api)
 
 	port := ":" + cfg.AppPort
 	log.Printf("🚀 Server is starting on http://localhost%s", port)

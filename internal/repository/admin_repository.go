@@ -2,9 +2,10 @@ package repository
 
 import (
 	"errors"
-	"super-app-chonburi-go/internal/domain"
+	"math"
 
 	"github.com/google/uuid"
+	"super-app-chonburi-go/internal/domain"
 	"gorm.io/gorm"
 )
 
@@ -18,7 +19,8 @@ func NewAdminRepository(db *gorm.DB) domain.AdminRepository {
 
 func (r *adminRepository) GetByEmail(email string) (*domain.Admin, error) {
 	var admin domain.Admin
-	if err := r.db.Preload("Department").First(&admin, "email = ?", email).Error; err != nil {
+	err := r.db.Preload("Role").Preload("Departments").Preload("Departments.Permissions").First(&admin, "email = ?", email).Error
+	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
 		}
@@ -29,7 +31,8 @@ func (r *adminRepository) GetByEmail(email string) (*domain.Admin, error) {
 
 func (r *adminRepository) GetByID(id uuid.UUID) (*domain.Admin, error) {
 	var admin domain.Admin
-	if err := r.db.Preload("Department").First(&admin, "id = ?", id).Error; err != nil {
+	err := r.db.Preload("Role").Preload("Departments").First(&admin, "id = ?", id).Error
+	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
 		}
@@ -42,27 +45,24 @@ func (r *adminRepository) GetPaginated(query domain.AdminQuery) (*domain.Paginat
 	var admins []domain.Admin
 	var totalItems int64
 
-	dbQuery := r.db.Model(&domain.Admin{}).
-		Where("\"departmentId\" NOT IN (SELECT id FROM \"AdminDepartment\" WHERE name = ?)", "superadmin")
+	db := r.db.Model(&domain.Admin{}).
+		Joins("JOIN admin_roles ON admins.role_id = admin_roles.id").
+		Where("admin_roles.is_superadmin = ?", false)
 
 	if query.Email != "" {
-		dbQuery = dbQuery.Where("email ILIKE ?", "%"+query.Email+"%")
+		db = db.Where("admins.email ILIKE ?", "%"+query.Email+"%")
 	}
 	if query.Name != "" {
-		dbQuery = dbQuery.Where("name ILIKE ?", "%"+query.Name+"%")
-	}
-	if query.DepartmentID != "" {
-		dbQuery = dbQuery.Where("\"departmentId\" = ?", query.DepartmentID)
+		db = db.Where("admins.name ILIKE ?", "%"+query.Name+"%")
 	}
 
-	if err := dbQuery.Count(&totalItems).Error; err != nil {
-		return nil, err
-	}
+	db.Count(&totalItems)
 
-	totalPages := int((totalItems + int64(query.PageSize) - 1) / int64(query.PageSize))
+	totalPages := int(math.Ceil(float64(totalItems) / float64(query.PageSize)))
 	offset := (query.PageNumber - 1) * query.PageSize
 
-	if err := dbQuery.Preload("Department").Offset(offset).Limit(query.PageSize).Order("\"createdAt\" DESC").Find(&admins).Error; err != nil {
+	err := db.Preload("Role").Preload("Departments").Offset(offset).Limit(query.PageSize).Find(&admins).Error
+	if err != nil {
 		return nil, err
 	}
 
@@ -75,11 +75,30 @@ func (r *adminRepository) GetPaginated(query domain.AdminQuery) (*domain.Paginat
 }
 
 func (r *adminRepository) Create(admin *domain.Admin) error {
-	return r.db.Create(admin).Error
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(admin).Error; err != nil {
+			return err
+		}
+
+		// Handle Departments Many-to-Many
+		if len(admin.Departments) > 0 {
+			if err := tx.Model(admin).Association("Departments").Replace(admin.Departments); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func (r *adminRepository) Update(admin *domain.Admin) error {
-	return r.db.Save(admin).Error
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Save(admin).Error; err != nil {
+			return err
+		}
+
+		// Sync Departments
+		return tx.Model(admin).Association("Departments").Replace(admin.Departments)
+	})
 }
 
 func (r *adminRepository) Delete(id uuid.UUID) error {

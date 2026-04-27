@@ -20,9 +20,18 @@ func (h *SystemPermissionHandler) RegisterRoutes(router fiber.Router) {
 }
 
 func (h *SystemPermissionHandler) GetAllPermissions(c fiber.Ctx) error {
-	permissions, err := h.useCase.GetAllPermissions()
+	allPermissions, err := h.useCase.GetAllPermissions()
 	if err != nil {
 		return ErrorResponse(c, err.Error(), fiber.StatusInternalServerError)
 	}
-	return SuccessResponse(c, permissions)
+
+	// Filter out sensitive permissions that shouldn't be managed via UI
+	var filtered []domain.SystemPermission
+	for _, p := range allPermissions {
+		if p.ID != "MANAGE_CITY_SETTINGS" {
+			filtered = append(filtered, p)
+		}
+	}
+
+	return SuccessResponse(c, filtered)
 }

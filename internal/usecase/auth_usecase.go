@@ -26,20 +26,44 @@ func (u *authUseCase) Login(email, password string) (string, domain.User, error)
 		return "", domain.User{}, err
 	}
 
+	if admin == nil {
+		return "", domain.User{}, errors.New("user not found")
+	}
+
 	if err := bcrypt.CompareHashAndPassword([]byte(admin.PasswordHash), []byte(password)); err != nil {
 		return "", domain.User{}, errors.New("invalid credentials")
 	}
 
-	role := admin.Department.Name
-	permissions := make([]string, len(admin.Department.Permissions))
-	copy(permissions, admin.Department.Permissions)
+	// Aggregate permissions
+	permissionMap := make(map[string]bool)
+	
+	if admin.Role != nil && admin.Role.IsSuperAdmin {
+		// 1. Super Admin gets SPECIAL permissions (Manage City, etc.)
+		permissionMap["MANAGE_CITY"] = true
+		permissionMap["MANAGE_ADMINS"] = true
+		permissionMap["MANAGE_DEPARTMENTS"] = true
+		permissionMap["VIEW_ALL_REPORTS"] = true
+	} else {
+		// 2. Regular Admins get permissions ONLY from their Departments
+		for _, dept := range admin.Departments {
+			for _, p := range dept.Permissions {
+				permissionMap[p.ID] = true
+			}
+		}
+	}
+
+	// Convert map back to slice
+	finalPermissions := make([]string, 0, len(permissionMap))
+	for pID := range permissionMap {
+		finalPermissions = append(finalPermissions, pID)
+	}
 
 	user := domain.User{
 		ID:          admin.ID.String(),
 		Email:       admin.Email,
 		Name:        admin.Name,
-		Role:        role,
-		Permissions: permissions,
+		Role:        admin.Role.Name,
+		Permissions: finalPermissions,
 	}
 
 	token, err := jwtutil.GenerateToken(user)

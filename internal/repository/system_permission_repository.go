@@ -15,6 +15,6 @@ func NewSystemPermissionRepository(db *gorm.DB) domain.SystemPermissionRepositor
 
 func (r *systemPermissionRepository) GetAll() ([]domain.SystemPermission, error) {
 	var permissions []domain.SystemPermission
-	err := r.db.Order("\"createdAt\" ASC").Find(&permissions).Error
+	err := r.db.Order("created_at ASC").Find(&permissions).Error
 	return permissions, err
 }

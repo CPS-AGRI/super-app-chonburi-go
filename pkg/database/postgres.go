@@ -36,9 +36,23 @@ func ConnectDB(cfg *config.Config) {
 
 	DB.Exec("CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\"")
 
+	// Drop old single relationship column if exists
+	if DB.Migrator().HasColumn(&domain.Admin{}, "department_id") {
+		DB.Migrator().DropColumn(&domain.Admin{}, "department_id")
+	}
+
+	// Drop unused individual permission tables
+	DB.Migrator().DropTable("admin_permissions")
+	DB.Migrator().DropTable("admin_individual_permissions")
+	DB.Migrator().DropTable("role_permissions")
+
+	// Drop unused columns from system_permissions
+	DB.Exec("ALTER TABLE system_permissions DROP COLUMN IF EXISTS module_type_id")
+
 	err = DB.AutoMigrate(
-		&domain.AdminDepartment{},
+		&domain.AdminRole{},
 		&domain.Admin{},
+		&domain.Department{},
 		&domain.SystemPermission{},
 		&domain.Municipality{},
 	)
