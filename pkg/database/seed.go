@@ -9,13 +9,28 @@ import (
 )
 
 func Seed() {
+	var permCount int64
+	DB.Model(&domain.SystemPermission{}).Count(&permCount)
+	if permCount == 0 {
+		log.Println("🌱 Seeding Permissions...")
+		systemPermissions := []domain.SystemPermission{
+			{ID: "MANAGE_COMPLAINTS", NameTh: "ระบบเรื่องร้องเรียน (MANAGE_COMPLAINTS)"},
+			{ID: "MANAGE_TAXES", NameTh: "ระบบภาษี (MANAGE_TAXES)"},
+			{ID: "MANAGE_PUBLIC_RELATIONS", NameTh: "ระบบประชาสัมพันธ์ (MANAGE_PUBLIC_RELATIONS)"},
+			{ID: "VERIFY_CITIZENS", NameTh: "ระบบยืนยันตัวตนประชาชน (VERIFY_CITIZENS)"},
+			{ID: "MANAGE_WEATHER_ALERTS", NameTh: "ระบบแจ้งเตือนภัยพิบัติ (MANAGE_WEATHER_ALERTS)"},
+			{ID: "MANAGE_CITY_SETTINGS", NameTh: "ระบบตั้งค่าระดับเมือง (MANAGE_CITY_SETTINGS)"},
+		}
+
+		for i := range systemPermissions {
+			DB.FirstOrCreate(&systemPermissions[i], domain.SystemPermission{ID: systemPermissions[i].ID})
+		}
+	}
 	var count int64
 	DB.Model(&domain.Admin{}).Count(&count)
 	if count > 0 {
 		return
 	}
-
-	log.Println("🌱 Seeding initial data...")
 
 	superAdminDeptID := uuid.New()
 	supervisorDeptID := uuid.New()

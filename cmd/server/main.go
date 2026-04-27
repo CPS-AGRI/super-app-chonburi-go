@@ -51,15 +51,27 @@ func main() {
 
 	adminRepo := repository.NewAdminRepository(database.DB)
 	muniRepo := repository.NewMunicipalityRepository(database.DB)
+	adminDepartmentRepo := repository.NewAdminDepartmentRepository(database.DB)
+	permissionRepo := repository.NewSystemPermissionRepository(database.DB)
 
 	authUC := usecase.NewAuthUseCase(adminRepo)
 	muniUC := usecase.NewMunicipalityUseCase(muniRepo)
+	adminUC := usecase.NewAdminUseCase(adminRepo)
+	adminDepartmentUC := usecase.NewAdminDepartmentUseCase(adminDepartmentRepo)
+	permissionUC := usecase.NewSystemPermissionUseCase(permissionRepo)
 
 	authHandler := delivery.NewAuthHandler(authUC)
 	muniHandler := delivery.NewMunicipalityHandler(muniUC)
+	adminHandler := delivery.NewAdminHandler(adminUC)
+	adminDepartmentHandler := delivery.NewAdminDepartmentHandler(adminDepartmentUC)
+	permissionHandler := delivery.NewSystemPermissionHandler(permissionUC)
 
+	api := app.Group("/api/v1")
 	authHandler.RegisterRoutes(app)
 	muniHandler.RegisterRoutes(app)
+	adminHandler.RegisterRoutes(api)
+	adminDepartmentHandler.RegisterRoutes(api)
+	permissionHandler.RegisterRoutes(api)
 
 	port := ":" + cfg.AppPort
 	log.Printf("🚀 Server is starting on http://localhost%s", port)
