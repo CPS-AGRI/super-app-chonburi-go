@@ -39,6 +39,7 @@ func ConnectDB(cfg *config.Config) {
 	err = DB.AutoMigrate(
 		&domain.AdminDepartment{},
 		&domain.Admin{},
+		&domain.SystemPermission{},
 		&domain.Municipality{},
 	)
 	if err != nil {
