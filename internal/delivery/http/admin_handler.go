@@ -1,8 +1,8 @@
 package http
 
 import (
-	"super-app-chonburi-go/internal/domain"
 	"strconv"
+	"super-app-chonburi-go/internal/domain"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
@@ -30,11 +30,10 @@ func (h *AdminHandler) GetAdmins(c fiber.Ctx) error {
 	pageSize, _ := strconv.Atoi(c.Query("page_size", "20"))
 
 	query := domain.AdminQuery{
-		PageNumber:   pageNumber,
-		PageSize:     pageSize,
-		Email:        c.Query("email"),
-		Name:         c.Query("name"),
-		DepartmentID: c.Query("department_id"),
+		PageNumber: pageNumber,
+		PageSize:   pageSize,
+		Email:      c.Query("email"),
+		Name:       c.Query("name"),
 	}
 
 	response, err := h.adminUseCase.GetAdmins(query)

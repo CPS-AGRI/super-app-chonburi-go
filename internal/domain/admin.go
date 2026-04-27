@@ -4,63 +4,77 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/lib/pq"
+	"gorm.io/gorm"
 )
 
-type AdminDepartment struct {
-	ID          uuid.UUID           `gorm:"type:uuid;primaryKey;default:uuid_generate_v4();column:id" json:"id"`
-	Name        string         `gorm:"unique;column:name" json:"name"`
-	Description *string        `gorm:"column:description" json:"description"`
-	IsActive    bool           `gorm:"column:isActive;default:true" json:"isActive"`
-	CreatedAt   time.Time      `gorm:"column:createdAt;default:now()" json:"createdAt"`
-	UpdatedAt   time.Time      `gorm:"column:updatedAt" json:"updatedAt"`
-	Permissions pq.StringArray `gorm:"type:text[];column:permissions" json:"permissions"`
+// AdminRole represents the hierarchy/title (e.g., SuperAdmin, Head, Staff)
+type AdminRole struct {
+	ID           uuid.UUID      `gorm:"type:uuid;primaryKey;default:uuid_generate_v4()" json:"id"`
+	Name         string         `gorm:"unique;not null" json:"name"`
+	Description  *string        `json:"description"`
+	IsSuperAdmin bool           `gorm:"column:is_superadmin;default:false" json:"isSuperAdmin"`
+	IsActive     bool           `gorm:"default:true" json:"isActive"`
+	CreatedAt    time.Time      `json:"createdAt"`
+	UpdatedAt    time.Time      `json:"updatedAt"`
+	DeletedAt    gorm.DeletedAt `gorm:"index" json:"-"`
 
-	Admins []Admin `gorm:"foreignKey:DepartmentID" json:"-"`
+	Admins []Admin `gorm:"foreignKey:RoleID" json:"-"`
 }
 
-func (AdminDepartment) TableName() string {
-	return "AdminDepartment"
+// Department represents the organizational unit (e.g., Engineering, Finance)
+type Department struct {
+	ID          uuid.UUID      `gorm:"type:uuid;primaryKey;default:uuid_generate_v4()" json:"id"`
+	Name        string         `gorm:"not null" json:"name"`
+	Description string         `json:"description"`
+	Status      string         `gorm:"default:'active'" json:"status"` // active, inactive
+	CreatedAt   time.Time      `json:"createdAt"`
+	UpdatedAt   time.Time      `json:"updatedAt"`
+	DeletedAt   gorm.DeletedAt `gorm:"index" json:"-"`
+
+	// Permissions assigned to this department
+	Permissions   []SystemPermission `gorm:"many2many:department_permissions;constraint:OnDelete:CASCADE" json:"permissions"`
+	PermissionIDs []string           `gorm:"-" json:"permissionIds,omitempty"`
+
+	// Admins belonging to this department (Many-to-Many)
+	Admins []Admin `gorm:"many2many:admin_departments;constraint:OnDelete:CASCADE" json:"-"`
 }
 
+// Admin represents the user account
 type Admin struct {
-	ID           uuid.UUID      `gorm:"type:uuid;primaryKey;default:uuid_generate_v4();column:id" json:"id"`
-	Email        string    `gorm:"unique;column:email" json:"email"`
-	Name         string    `gorm:"column:name" json:"name"`
-	LastName     string    `gorm:"column:lastName" json:"lastName"`
-	Username     string    `gorm:"column:username" json:"username"`
-	PhoneNumber  string    `gorm:"column:phoneNumber" json:"phone"`
-	Position     string    `gorm:"column:position" json:"position"`
-	Status       string    `gorm:"column:status;default:'active'" json:"status"`
-	Password     string    `gorm:"-" json:"password,omitempty"`     // Transient field for request
-	PasswordHash string    `gorm:"column:passwordHash" json:"-"`    // Ignored in JSON response
-	DepartmentID uuid.UUID      `gorm:"type:uuid;column:departmentId" json:"departmentId"`
-	Permissions  pq.StringArray `gorm:"type:text[];column:permissions" json:"permissions"`
-	CreatedAt    time.Time `gorm:"column:createdAt;default:now()" json:"createdAt"`
-	UpdatedAt    time.Time `gorm:"column:updatedAt" json:"updatedAt"`
+	ID           uuid.UUID      `gorm:"type:uuid;primaryKey;default:uuid_generate_v4()" json:"id"`
+	Email        string         `gorm:"unique;not null" json:"email"`
+	Name         string         `gorm:"column:name" json:"name"`
+	LastName     string         `gorm:"column:last_name" json:"lastName"`
+	Username     string         `gorm:"column:username" json:"username"`
+	PhoneNumber  string         `gorm:"column:phone" json:"phone"`
+	Position     string         `gorm:"column:position" json:"position"`
+	Status       string         `gorm:"default:'active'" json:"status"`
+	Password     string         `gorm:"-" json:"password,omitempty"`
+	PasswordHash string         `gorm:"column:password_hash" json:"-"`
+	
+	// Identity
+	RoleID       *uuid.UUID     `gorm:"type:uuid;column:role_id" json:"roleId"`
 
-	Department AdminDepartment `gorm:"foreignKey:DepartmentID;constraint:OnDelete:RESTRICT;" json:"department"`
+	CreatedAt    time.Time      `json:"createdAt"`
+	UpdatedAt    time.Time      `json:"updatedAt"`
+	DeletedAt    gorm.DeletedAt `gorm:"index" json:"-"`
+
+	// Relationships
+	Role       *AdminRole    `gorm:"foreignKey:RoleID;constraint:OnDelete:SET NULL" json:"role"`
+	Departments []Department `gorm:"many2many:admin_departments;constraint:OnDelete:CASCADE" json:"departments"`
+	DepartmentIDs []string   `gorm:"-" json:"departmentIds,omitempty"`
 }
 
-func (Admin) TableName() string {
-	return "Admin"
+type SystemPermission struct {
+	ID          string    `gorm:"primaryKey" json:"id"`
+	ParentID    *string   `json:"parentId"`
+	NameTh      string    `json:"nameTh"`
+	Description string    `json:"description"`
+	CreatedAt   time.Time `json:"createdAt"`
+	UpdatedAt   time.Time `json:"updatedAt"`
 }
 
-type AdminQuery struct {
-	PageNumber   int
-	PageSize     int
-	Email        string
-	Name         string
-	DepartmentID string
-}
-
-type PaginatedAdminResponse struct {
-	PageNumber int       `json:"pageNumber"`
-	TotalItems int64     `json:"totalItems"`
-	TotalPages int       `json:"totalPages"`
-	Items      []Admin   `json:"items"`
-}
-
+// Interfaces
 type AdminRepository interface {
 	GetByEmail(email string) (*Admin, error)
 	GetByID(id uuid.UUID) (*Admin, error)
@@ -78,45 +92,60 @@ type AdminUseCase interface {
 	DeleteAdmin(id uuid.UUID) error
 }
 
-type AdminDepartmentQuery struct {
-	PageNumber int
-	PageSize   int
-	Name       string
-}
-
-type PaginatedAdminDepartmentResponse struct {
-	PageNumber int               `json:"pageNumber"`
-	TotalItems int64             `json:"totalItems"`
-	TotalPages int               `json:"totalPages"`
-	Items      []AdminDepartment `json:"items"`
-}
-
-type AdminDepartmentRepository interface {
-	GetPaginated(query AdminDepartmentQuery) (*PaginatedAdminDepartmentResponse, error)
-	GetByID(id uuid.UUID) (*AdminDepartment, error)
-	Create(department *AdminDepartment) error
-	Update(department *AdminDepartment) error
+type DepartmentRepository interface {
+	GetPaginated(query DepartmentQuery) (*PaginatedDepartmentResponse, error)
+	GetByID(id uuid.UUID) (*Department, error)
+	GetAll() ([]Department, error)
+	Create(dept *Department) error
+	Update(dept *Department) error
 	Delete(id uuid.UUID) error
 }
 
-type AdminDepartmentUseCase interface {
-	GetDepartments(query AdminDepartmentQuery) (*PaginatedAdminDepartmentResponse, error)
-	GetDepartmentByID(id uuid.UUID) (*AdminDepartment, error)
-	CreateDepartment(department *AdminDepartment) error
-	UpdateDepartment(department *AdminDepartment) error
+type DepartmentUseCase interface {
+	GetDepartments(query DepartmentQuery) (*PaginatedDepartmentResponse, error)
+	GetAllDepartments() ([]Department, error)
+	GetDepartmentByID(id uuid.UUID) (*Department, error)
+	CreateDepartment(dept *Department) error
+	UpdateDepartment(dept *Department) error
 	DeleteDepartment(id uuid.UUID) error
 }
 
-type SystemPermission struct {
-	ID          string    `gorm:"primaryKey;column:id" json:"id"`                      // e.g. "MANAGE_COMPLAINTS"
-	NameTh      string    `gorm:"column:nameTh" json:"nameTh"`                         // e.g. "ระบบเรื่องร้องเรียน"
-	Description string    `gorm:"column:description" json:"description"`               // module description
-	CreatedAt   time.Time `gorm:"column:createdAt;default:now()" json:"createdAt"`
-	UpdatedAt   time.Time `gorm:"column:updatedAt;default:now()" json:"updatedAt"`
+// Queries & Responses
+type AdminQuery struct {
+	PageNumber int
+	PageSize   int
+	Email      string
+	Name       string
 }
 
-func (SystemPermission) TableName() string {
-	return "SystemPermission"
+type PaginatedAdminResponse struct {
+	PageNumber int     `json:"pageNumber"`
+	TotalItems int64   `json:"totalItems"`
+	TotalPages int     `json:"totalPages"`
+	Items      []Admin `json:"items"`
+}
+
+type DepartmentQuery struct {
+	PageNumber int    `query:"page"`
+	PageSize   int    `query:"pageSize"`
+	Name       string `query:"name"`
+	Status     string `query:"status"`
+}
+
+type PaginatedDepartmentResponse struct {
+	PageNumber int          `json:"pageNumber"`
+	TotalItems int64        `json:"totalItems"`
+	TotalPages int          `json:"totalPages"`
+	Items      []Department `json:"items"`
+}
+
+type AdminRoleRepository interface {
+	GetAll() ([]AdminRole, error)
+	GetByID(id uuid.UUID) (*AdminRole, error)
+}
+
+type AdminRoleUseCase interface {
+	GetAllRoles() ([]AdminRole, error)
 }
 
 type SystemPermissionRepository interface {

@@ -7,24 +7,20 @@ import (
 )
 
 type Municipality struct {
-	ID             uuid.UUID `gorm:"type:uuid;primaryKey;default:uuid_generate_v4();column:id" json:"id"`
-	CityNameTh     string    `gorm:"column:cityNameTh" json:"cityNameTh"`
-	CityNameEn     string    `gorm:"column:cityNameEn" json:"cityNameEn"`
-	CityAddressTh  string    `gorm:"type:text;column:cityAddressTh" json:"cityAddressTh"`
-	CityAddressEn  string    `gorm:"type:text;column:cityAddressEn" json:"cityAddressEn"`
-	CityPhone      string    `gorm:"column:cityPhone" json:"cityPhone"`
-	CityLogoUrl    string    `gorm:"column:cityLogoUrl" json:"cityLogoUrl"`
-	CityLat        float64   `gorm:"column:cityLat" json:"cityLat"`
-	CityLng        float64   `gorm:"column:cityLng" json:"cityLng"`
-	Status         string    `gorm:"column:status;default:'active'" json:"status"`
-	CreatedBy      string    `gorm:"column:createdBy" json:"createdBy"`
-	UpdatedBy      string    `gorm:"column:updatedBy" json:"updatedBy"`
-	CreatedAt      time.Time `gorm:"column:createdAt" json:"createdAt"`
-	UpdatedAt      time.Time `gorm:"column:updatedAt" json:"updatedAt"`
-}
-
-func (Municipality) TableName() string {
-	return "Municipality"
+	ID             uuid.UUID `gorm:"type:uuid;primaryKey;default:uuid_generate_v4()" json:"id"`
+	CityNameTh     string    `json:"cityNameTh"`
+	CityNameEn     string    `json:"cityNameEn"`
+	CityAddressTh  string    `gorm:"type:text" json:"cityAddressTh"`
+	CityAddressEn  string    `gorm:"type:text" json:"cityAddressEn"`
+	CityPhone      string    `json:"cityPhone"`
+	CityLogoUrl    string    `json:"cityLogoUrl"`
+	CityLat        float64   `json:"cityLat"`
+	CityLng        float64   `json:"cityLng"`
+	Status         string    `gorm:"default:'active'" json:"status"`
+	CreatedBy      string    `json:"createdBy"`
+	UpdatedBy      string    `json:"updatedBy"`
+	CreatedAt      time.Time `json:"createdAt"`
+	UpdatedAt      time.Time `json:"updatedAt"`
 }
 
 type MunicipalityRepository interface {
