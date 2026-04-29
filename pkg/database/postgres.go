@@ -37,9 +37,13 @@ func ConnectDB(cfg *config.Config) {
 	DB.Exec("CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\"")
 
 	err = DB.AutoMigrate(
-		&domain.AdminDepartment{},
+		&domain.AdminRole{},
 		&domain.Admin{},
+		&domain.Department{},
+		&domain.SystemPermission{},
 		&domain.Municipality{},
+		&domain.ActivityLog{},
+		&domain.AdminRefreshToken{},
 	)
 	if err != nil {
 		log.Fatalf("Fatal: Failed to auto-migrate: %v", err)

@@ -9,6 +9,7 @@ import (
 	"super-app-chonburi-go/internal/repository"
 	"super-app-chonburi-go/internal/usecase"
 	"super-app-chonburi-go/pkg/database"
+	"super-app-chonburi-go/internal/delivery/http/middleware"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/middleware/compress"
@@ -51,15 +52,39 @@ func main() {
 
 	adminRepo := repository.NewAdminRepository(database.DB)
 	muniRepo := repository.NewMunicipalityRepository(database.DB)
+	adminRoleRepo := repository.NewAdminRoleRepository(database.DB)
+	permissionRepo := repository.NewSystemPermissionRepository(database.DB)
+	deptRepo := repository.NewDepartmentRepository(database.DB)
+	auditRepo := repository.NewActivityLogRepository(database.DB)
+	rtRepo := repository.NewRefreshTokenRepository(database.DB)
 
-	authUC := usecase.NewAuthUseCase(adminRepo)
+	// Apply Global Middleware
+	app.Use(middleware.AuditLog(auditRepo))
+
+	authUC := usecase.NewAuthUseCase(adminRepo, rtRepo)
 	muniUC := usecase.NewMunicipalityUseCase(muniRepo)
+	adminUC := usecase.NewAdminUseCase(adminRepo)
+	adminRoleUC := usecase.NewAdminRoleUseCase(adminRoleRepo)
+	permissionUC := usecase.NewSystemPermissionUseCase(permissionRepo)
+	deptUC := usecase.NewDepartmentUseCase(deptRepo)
 
 	authHandler := delivery.NewAuthHandler(authUC)
 	muniHandler := delivery.NewMunicipalityHandler(muniUC)
+	adminHandler := delivery.NewAdminHandler(adminUC)
+	adminRoleHandler := delivery.NewAdminRoleHandler(adminRoleUC)
+	permissionHandler := delivery.NewSystemPermissionHandler(permissionUC)
+	deptHandler := delivery.NewDepartmentHandler(deptUC)
 
+	api := app.Group("/api/v1")
+	// Protected routes example:
+	// api.Use(jwtutil.RequireAuth())
+	
 	authHandler.RegisterRoutes(app)
 	muniHandler.RegisterRoutes(app)
+	adminHandler.RegisterRoutes(api)
+	adminRoleHandler.RegisterRoutes(api)
+	permissionHandler.RegisterRoutes(api)
+	deptHandler.RegisterRoutes(api)
 
 	port := ":" + cfg.AppPort
 	log.Printf("🚀 Server is starting on http://localhost%s", port)
