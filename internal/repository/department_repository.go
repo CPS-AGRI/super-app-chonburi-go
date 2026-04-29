@@ -88,7 +88,7 @@ func (r *departmentRepository) Create(dept *domain.Department) error {
 
 func (r *departmentRepository) Update(dept *domain.Department) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Save(dept).Error; err != nil {
+		if err := tx.Model(dept).Omit("CreatedAt", "CreatedBy").Updates(dept).Error; err != nil {
 			return err
 		}
 

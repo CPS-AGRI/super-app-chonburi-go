@@ -31,7 +31,7 @@ func (r *adminRepository) GetByEmail(email string) (*domain.Admin, error) {
 
 func (r *adminRepository) GetByID(id uuid.UUID) (*domain.Admin, error) {
 	var admin domain.Admin
-	err := r.db.Preload("Role").Preload("Departments").First(&admin, "id = ?", id).Error
+	err := r.db.Preload("Role").Preload("Departments").Preload("Departments.Permissions").First(&admin, "id = ?", id).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
@@ -92,7 +92,10 @@ func (r *adminRepository) Create(admin *domain.Admin) error {
 
 func (r *adminRepository) Update(admin *domain.Admin) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Save(admin).Error; err != nil {
+		// Use Updates with a struct to update only non-zero fields or use a map
+		// To ensure UpdatedBy and other zero-valued fields (if any) are updated, 
+		// but CreatedAt/By are preserved, we should use Select or Omit.
+		if err := tx.Model(admin).Omit("CreatedAt", "CreatedBy").Updates(admin).Error; err != nil {
 			return err
 		}
 

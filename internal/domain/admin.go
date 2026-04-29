@@ -14,6 +14,8 @@ type AdminRole struct {
 	Description  *string        `json:"description"`
 	IsSuperAdmin bool           `gorm:"column:is_superadmin;default:false" json:"isSuperAdmin"`
 	IsActive     bool           `gorm:"default:true" json:"isActive"`
+	CreatedBy    string         `json:"createdBy"`
+	UpdatedBy    string         `json:"updatedBy"`
 	CreatedAt    time.Time      `json:"createdAt"`
 	UpdatedAt    time.Time      `json:"updatedAt"`
 	DeletedAt    gorm.DeletedAt `gorm:"index" json:"-"`
@@ -27,6 +29,8 @@ type Department struct {
 	Name        string         `gorm:"not null" json:"name"`
 	Description string         `json:"description"`
 	Status      string         `gorm:"default:'active'" json:"status"` // active, inactive
+	CreatedBy   string         `json:"createdBy"`
+	UpdatedBy   string         `json:"updatedBy"`
 	CreatedAt   time.Time      `json:"createdAt"`
 	UpdatedAt   time.Time      `json:"updatedAt"`
 	DeletedAt   gorm.DeletedAt `gorm:"index" json:"-"`
@@ -55,6 +59,8 @@ type Admin struct {
 	// Identity
 	RoleID       *uuid.UUID     `gorm:"type:uuid;column:role_id" json:"roleId"`
 
+	CreatedBy    string         `json:"createdBy"`
+	UpdatedBy    string         `json:"updatedBy"`
 	CreatedAt    time.Time      `json:"createdAt"`
 	UpdatedAt    time.Time      `json:"updatedAt"`
 	DeletedAt    gorm.DeletedAt `gorm:"index" json:"-"`
@@ -63,6 +69,18 @@ type Admin struct {
 	Role       *AdminRole    `gorm:"foreignKey:RoleID;constraint:OnDelete:SET NULL" json:"role"`
 	Departments []Department `gorm:"many2many:admin_departments;constraint:OnDelete:CASCADE" json:"departments"`
 	DepartmentIDs []string   `gorm:"-" json:"departmentIds,omitempty"`
+	RefreshTokens []AdminRefreshToken `gorm:"foreignKey:AdminUserID" json:"-"`
+}
+
+type AdminRefreshToken struct {
+	ID          uuid.UUID `gorm:"type:uuid;primaryKey;default:uuid_generate_v4()" json:"id"`
+	Token       string    `gorm:"unique;not null" json:"token"`
+	ExpiryTime  time.Time `json:"expiryTime"`
+	AdminUserID uuid.UUID `gorm:"type:uuid;not null" json:"adminUserId"`
+	CreatedBy   string    `json:"createdBy"`
+	UpdatedBy   string    `json:"updatedBy"`
+	CreatedAt   time.Time `json:"createdAt"`
+	UpdatedAt   time.Time `json:"updatedAt"`
 }
 
 type SystemPermission struct {
@@ -70,6 +88,8 @@ type SystemPermission struct {
 	ParentID    *string   `json:"parentId"`
 	NameTh      string    `json:"nameTh"`
 	Description string    `json:"description"`
+	CreatedBy   string    `json:"createdBy"`
+	UpdatedBy   string    `json:"updatedBy"`
 	CreatedAt   time.Time `json:"createdAt"`
 	UpdatedAt   time.Time `json:"updatedAt"`
 }

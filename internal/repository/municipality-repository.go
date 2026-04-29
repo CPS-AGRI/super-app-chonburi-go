@@ -32,7 +32,7 @@ func (r *municipalityRepository) Create(muni *domain.Municipality) error {
 }
 
 func (r *municipalityRepository) Update(muni *domain.Municipality) error {
-	return r.db.Save(muni).Error
+	return r.db.Model(muni).Omit("CreatedAt", "CreatedBy").Updates(muni).Error
 }
 
 func (r *municipalityRepository) Delete(id uuid.UUID) error {

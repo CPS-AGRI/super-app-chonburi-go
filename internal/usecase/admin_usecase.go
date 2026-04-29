@@ -87,6 +87,7 @@ func (u *adminUseCase) UpdateAdmin(admin *domain.Admin) error {
 	existingAdmin.Position = admin.Position
 	existingAdmin.Status = admin.Status
 	existingAdmin.RoleID = admin.RoleID
+	existingAdmin.UpdatedBy = admin.UpdatedBy
 	
 	// Map DepartmentIDs to struct slice
 	existingAdmin.Departments = make([]domain.Department, len(admin.DepartmentIDs))
