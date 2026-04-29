@@ -14,10 +14,19 @@ type LoginRequest struct {
 }
 
 type AuthResponse struct {
-	Token string `json:"token"`
-	User  User   `json:"user"`
+	Token        string `json:"token"`
+	RefreshToken string `json:"refreshToken"`
+	User         User   `json:"user"`
 }
 
 type AuthUseCase interface {
-	Login(email, password string) (string, User, error)
+	Login(email, password string) (string, string, User, error)
+	RefreshToken(token string) (string, string, User, error)
+}
+
+type RefreshTokenRepository interface {
+	Create(token *AdminRefreshToken) error
+	GetByToken(token string) (*AdminRefreshToken, error)
+	DeleteByToken(token string) error
+	DeleteByAdminID(adminID string) error
 }

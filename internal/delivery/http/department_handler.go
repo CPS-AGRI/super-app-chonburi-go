@@ -6,6 +6,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/gofiber/fiber/v3"
 	"super-app-chonburi-go/internal/domain"
+	"super-app-chonburi-go/pkg/jwtutil"
 )
 
 type DepartmentHandler struct {
@@ -79,6 +80,12 @@ func (h *DepartmentHandler) Create(c fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
 	}
 
+	// Set Audit fields
+	if user, ok := c.Locals("user").(*jwtutil.CustomClaims); ok {
+		dept.CreatedBy = user.Name
+		dept.UpdatedBy = user.Name
+	}
+
 	if err := h.useCase.CreateDepartment(&dept); err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
@@ -97,6 +104,11 @@ func (h *DepartmentHandler) Update(c fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
 	}
 	dept.ID = id
+
+	// Set Audit fields
+	if user, ok := c.Locals("user").(*jwtutil.CustomClaims); ok {
+		dept.UpdatedBy = user.Name
+	}
 
 	if err := h.useCase.UpdateDepartment(&dept); err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})

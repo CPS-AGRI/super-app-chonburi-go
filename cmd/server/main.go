@@ -9,6 +9,7 @@ import (
 	"super-app-chonburi-go/internal/repository"
 	"super-app-chonburi-go/internal/usecase"
 	"super-app-chonburi-go/pkg/database"
+	"super-app-chonburi-go/internal/delivery/http/middleware"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/middleware/compress"
@@ -54,8 +55,13 @@ func main() {
 	adminRoleRepo := repository.NewAdminRoleRepository(database.DB)
 	permissionRepo := repository.NewSystemPermissionRepository(database.DB)
 	deptRepo := repository.NewDepartmentRepository(database.DB)
+	auditRepo := repository.NewActivityLogRepository(database.DB)
+	rtRepo := repository.NewRefreshTokenRepository(database.DB)
 
-	authUC := usecase.NewAuthUseCase(adminRepo)
+	// Apply Global Middleware
+	app.Use(middleware.AuditLog(auditRepo))
+
+	authUC := usecase.NewAuthUseCase(adminRepo, rtRepo)
 	muniUC := usecase.NewMunicipalityUseCase(muniRepo)
 	adminUC := usecase.NewAdminUseCase(adminRepo)
 	adminRoleUC := usecase.NewAdminRoleUseCase(adminRoleRepo)
@@ -70,6 +76,9 @@ func main() {
 	deptHandler := delivery.NewDepartmentHandler(deptUC)
 
 	api := app.Group("/api/v1")
+	// Protected routes example:
+	// api.Use(jwtutil.RequireAuth())
+	
 	authHandler.RegisterRoutes(app)
 	muniHandler.RegisterRoutes(app)
 	adminHandler.RegisterRoutes(api)

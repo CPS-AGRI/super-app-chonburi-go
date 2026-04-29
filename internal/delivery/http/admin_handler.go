@@ -3,6 +3,7 @@ package http
 import (
 	"strconv"
 	"super-app-chonburi-go/internal/domain"
+	"super-app-chonburi-go/pkg/jwtutil"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
@@ -64,6 +65,12 @@ func (h *AdminHandler) CreateAdmin(c fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "JSON Bind Error: " + err.Error()})
 	}
 
+	// Set Audit fields
+	if user, ok := c.Locals("user").(*jwtutil.CustomClaims); ok {
+		admin.CreatedBy = user.Name
+		admin.UpdatedBy = user.Name
+	}
+
 	if err := h.adminUseCase.CreateAdmin(&admin); err != nil {
 		if err.Error() == "email already exists" {
 			return c.Status(fiber.StatusConflict).JSON(fiber.Map{"error": err.Error()})
@@ -85,6 +92,11 @@ func (h *AdminHandler) UpdateAdmin(c fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid input"})
 	}
 	admin.ID = id
+
+	// Set Audit fields
+	if user, ok := c.Locals("user").(*jwtutil.CustomClaims); ok {
+		admin.UpdatedBy = user.Name
+	}
 
 	if err := h.adminUseCase.UpdateAdmin(&admin); err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
