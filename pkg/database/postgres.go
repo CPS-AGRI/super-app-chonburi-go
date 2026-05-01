@@ -42,6 +42,7 @@ func ConnectDB(cfg *config.Config) {
 		&domain.Department{},
 		&domain.SystemPermission{},
 		&domain.Municipality{},
+		&domain.MunicipalityBank{},
 		&domain.ActivityLog{},
 		&domain.AdminRefreshToken{},
 	)
