@@ -87,6 +87,7 @@ type SystemPermission struct {
 	ID          string    `gorm:"primaryKey" json:"id"`
 	ParentID    *string   `json:"parentId"`
 	NameTh      string    `json:"nameTh"`
+	Module      string    `json:"module"`
 	Description string    `json:"description"`
 	CreatedBy   string    `json:"createdBy"`
 	UpdatedBy   string    `json:"updatedBy"`
@@ -170,8 +171,14 @@ type AdminRoleUseCase interface {
 
 type SystemPermissionRepository interface {
 	GetAll() ([]SystemPermission, error)
+	Create(p *SystemPermission) error
+	Update(p *SystemPermission) error
+	Delete(id string) error
 }
 
 type SystemPermissionUseCase interface {
 	GetAllPermissions() ([]SystemPermission, error)
+	CreatePermission(p *SystemPermission) error
+	UpdatePermission(p *SystemPermission) error
+	DeletePermission(id string) error
 }
