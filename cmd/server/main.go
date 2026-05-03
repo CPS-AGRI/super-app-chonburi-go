@@ -64,6 +64,7 @@ func main() {
 	auditRepo := repository.NewActivityLogRepository(database.DB)
 	rtRepo := repository.NewRefreshTokenRepository(database.DB)
 	bankRepo := repository.NewMunicipalityBankRepository(database.DB)
+	shiftRepo := repository.NewCityShiftRepository(database.DB)
 
 	// Apply Global Middleware
 	app.Use(middleware.AuditLog(auditRepo))
@@ -75,8 +76,10 @@ func main() {
 	permissionUC := usecase.NewSystemPermissionUseCase(permissionRepo)
 	deptUC := usecase.NewDepartmentUseCase(deptRepo)
 	bankUC := usecase.NewMunicipalityBankUseCase(bankRepo)
+	shiftUC := usecase.NewCityShiftUseCase(shiftRepo)
 
 	authHandler := delivery.NewAuthHandler(authUC)
+	shiftHandler := delivery.NewCityShiftHandler(shiftUC)
 	muniHandler := delivery.NewMunicipalityHandler(muniUC)
 	uploadHandler := delivery.NewUploadHandler(minioClient, cfg.MinIO)
 	adminHandler := delivery.NewAdminHandler(adminUC)
@@ -90,6 +93,7 @@ func main() {
 	// api.Use(jwtutil.RequireAuth())
 	
 	authHandler.RegisterRoutes(app)
+	shiftHandler.RegisterRoutes(app)
 	muniHandler.RegisterRoutes(app)
 	uploadHandler.RegisterRoutes(app)
 	adminHandler.RegisterRoutes(api)

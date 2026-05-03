@@ -13,7 +13,8 @@ type MunicipalityBank struct {
 	BankAccountNumber string    `gorm:"not null" json:"bankAccountNumber"`
 	BankBranch        string    `json:"bankBranch"`
 	BankType          string    `json:"bankType"` // Saving, Current, etc.
-	BankQrCodeUrl     string    `json:"bankQrCodeUrl"`
+	PromptPayNumber   string    `json:"promptPayNumber"`
+	BankQrCodeUrl     string    `json:"bankQrCodeUrl"` // Kept for legacy support or manual override
 	IsActive          bool      `gorm:"default:true" json:"isActive"`
 	Status            string    `gorm:"default:'active'" json:"status"`
 	CreatedBy         string    `json:"createdBy"`

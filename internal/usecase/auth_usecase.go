@@ -65,6 +65,7 @@ func (u *authUseCase) Login(email, password string) (string, string, domain.User
 		ID:          admin.ID.String(),
 		Email:       admin.Email,
 		Name:        admin.Name,
+		LastName:    admin.LastName,
 		Role:        admin.Role.Name,
 		Permissions: finalPermissions,
 	}
@@ -129,6 +130,7 @@ func (u *authUseCase) RefreshToken(token string) (string, string, domain.User, e
 		ID:          admin.ID.String(),
 		Email:       admin.Email,
 		Name:        admin.Name,
+		LastName:    admin.LastName,
 		Role:        admin.Role.Name,
 		Permissions: finalPermissions,
 	}
