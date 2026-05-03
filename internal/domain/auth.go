@@ -4,6 +4,7 @@ type User struct {
 	ID          string   `json:"id"`
 	Email       string   `json:"email"`
 	Name        string   `json:"name"`
+	LastName    string   `json:"lastName"`
 	Role        string   `json:"role"`
 	Permissions []string `json:"permissions"`
 }
