@@ -59,6 +59,7 @@ func main() {
 	rtRepo := repository.NewRefreshTokenRepository(database.DB)
 	bankRepo := repository.NewMunicipalityBankRepository(database.DB)
 	shiftRepo := repository.NewCityShiftRepository(database.DB)
+	complaintRepo := repository.NewComplaintRepository(database.DB)
 
 	// Apply Global Middleware
 	app.Use(middleware.AuditLog(auditRepo))
@@ -71,6 +72,7 @@ func main() {
 	deptUC := usecase.NewDepartmentUseCase(deptRepo)
 	bankUC := usecase.NewMunicipalityBankUseCase(bankRepo)
 	shiftUC := usecase.NewCityShiftUseCase(shiftRepo)
+	complaintUC := usecase.NewComplaintUseCase(complaintRepo, adminRepo)
 
 	authHandler := delivery.NewAuthHandler(authUC)
 	shiftHandler := delivery.NewCityShiftHandler(shiftUC)
@@ -80,6 +82,7 @@ func main() {
 	permissionHandler := delivery.NewSystemPermissionHandler(permissionUC)
 	deptHandler := delivery.NewDepartmentHandler(deptUC)
 	bankHandler := delivery.NewMunicipalityBankHandler(bankUC)
+	complaintHandler := delivery.NewComplaintHandler(complaintUC)
 
 	api := app.Group("/api/v1")
 	// Protected routes example:
@@ -93,6 +96,7 @@ func main() {
 	permissionHandler.RegisterRoutes(api)
 	deptHandler.RegisterRoutes(api)
 	bankHandler.RegisterRoutes(app)
+	complaintHandler.RegisterRoutes(api)
 
 	port := ":" + cfg.AppPort
 	log.Printf("🚀 Server is starting on http://localhost%s", port)
