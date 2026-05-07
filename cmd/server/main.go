@@ -9,7 +9,6 @@ import (
 	"super-app-chonburi-go/internal/repository"
 	"super-app-chonburi-go/internal/usecase"
 	"super-app-chonburi-go/pkg/database"
-	"super-app-chonburi-go/internal/delivery/http/middleware"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/middleware/compress"
@@ -23,10 +22,9 @@ func main() {
 	cfg := config.LoadConfig()
 
 	database.ConnectDB(cfg)
-	database.Seed()
 
 	app := fiber.New(fiber.Config{
-		AppName:      "Super App Chonburi Backend v3",
+		AppName:      "Super App Chonburi Backend (MueangSmart)",
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
 		IdleTimeout:  30 * time.Second,
@@ -40,51 +38,57 @@ func main() {
 	app.Use(logger.New())
 
 	app.Get("/", func(c fiber.Ctx) error {
-		return c.SendString("Super App Chonburi API is running...")
+		return c.SendString("Super App Chonburi API (MueangSmart Core) is running...")
 	})
 	
 	app.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"http://localhost:3000"},
+		AllowOrigins:     []string{"http://localhost:3000", "http://localhost:3001", "http://localhost:5173"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization"},
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowCredentials: true,
 	}))
 
+	// Repositories
 	adminRepo := repository.NewAdminRepository(database.DB)
-	muniRepo := repository.NewMunicipalityRepository(database.DB)
 	adminRoleRepo := repository.NewAdminRoleRepository(database.DB)
-	permissionRepo := repository.NewSystemPermissionRepository(database.DB)
 	deptRepo := repository.NewDepartmentRepository(database.DB)
-	auditRepo := repository.NewActivityLogRepository(database.DB)
 	rtRepo := repository.NewRefreshTokenRepository(database.DB)
+	complaintRepo := repository.NewComplaintRepository(database.DB)
+	moduleRepo := repository.NewModuleRepository(database.DB)
+	moduleTypeRepo := repository.NewModuleTypeRepository(database.DB)
+	muniRepo := repository.NewMunicipalityRepository(database.DB)
 
-	// Apply Global Middleware
-	app.Use(middleware.AuditLog(auditRepo))
-
+	// UseCases
 	authUC := usecase.NewAuthUseCase(adminRepo, rtRepo)
-	muniUC := usecase.NewMunicipalityUseCase(muniRepo)
 	adminUC := usecase.NewAdminUseCase(adminRepo)
 	adminRoleUC := usecase.NewAdminRoleUseCase(adminRoleRepo)
-	permissionUC := usecase.NewSystemPermissionUseCase(permissionRepo)
 	deptUC := usecase.NewDepartmentUseCase(deptRepo)
+	complaintUC := usecase.NewComplaintUseCase(complaintRepo, adminRepo)
+	moduleUC := usecase.NewModuleUseCase(moduleRepo, adminRepo)
+	moduleTypeUC := usecase.NewModuleTypeUseCase(moduleTypeRepo)
+	muniUC := usecase.NewMunicipalityUseCase(muniRepo)
 
+	// Handlers
 	authHandler := delivery.NewAuthHandler(authUC)
-	muniHandler := delivery.NewMunicipalityHandler(muniUC)
 	adminHandler := delivery.NewAdminHandler(adminUC)
 	adminRoleHandler := delivery.NewAdminRoleHandler(adminRoleUC)
-	permissionHandler := delivery.NewSystemPermissionHandler(permissionUC)
 	deptHandler := delivery.NewDepartmentHandler(deptUC)
+	complaintHandler := delivery.NewComplaintHandler(complaintUC, deptUC)
+	moduleHandler := delivery.NewModuleHandler(moduleUC)
+	moduleTypeHandler := delivery.NewModuleTypeHandler(moduleTypeUC)
+	muniHandler := delivery.NewMunicipalityHandler(muniUC)
 
 	api := app.Group("/api/v1")
-	// Protected routes example:
-	// api.Use(jwtutil.RequireAuth())
 	
-	authHandler.RegisterRoutes(app)
-	muniHandler.RegisterRoutes(app)
+	// Register Routes
+	authHandler.RegisterRoutes(api)
 	adminHandler.RegisterRoutes(api)
 	adminRoleHandler.RegisterRoutes(api)
-	permissionHandler.RegisterRoutes(api)
 	deptHandler.RegisterRoutes(api)
+	complaintHandler.RegisterRoutes(api)
+	moduleHandler.RegisterRoutes(api)
+	moduleTypeHandler.RegisterRoutes(api)
+	muniHandler.RegisterRoutes(api)
 
 	port := ":" + cfg.AppPort
 	log.Printf("🚀 Server is starting on http://localhost%s", port)

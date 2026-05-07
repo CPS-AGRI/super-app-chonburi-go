@@ -9,7 +9,7 @@ type refreshTokenRepository struct {
 	db *gorm.DB
 }
 
-func NewRefreshTokenRepository(db *gorm.DB) domain.RefreshTokenRepository {
+func NewRefreshTokenRepository(db *gorm.DB) domain.AdminRefreshTokenRepository {
 	return &refreshTokenRepository{db}
 }
 

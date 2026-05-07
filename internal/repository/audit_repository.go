@@ -5,14 +5,14 @@ import (
 	"gorm.io/gorm"
 )
 
-type activityLogRepository struct {
+type auditLogRepository struct {
 	db *gorm.DB
 }
 
-func NewActivityLogRepository(db *gorm.DB) domain.ActivityLogRepository {
-	return &activityLogRepository{db}
+func NewAuditLogRepository(db *gorm.DB) *auditLogRepository {
+	return &auditLogRepository{db}
 }
 
-func (r *activityLogRepository) Create(log *domain.ActivityLog) error {
+func (r *auditLogRepository) Create(log *domain.AuditLog) error {
 	return r.db.Create(log).Error
 }
