@@ -6,7 +6,6 @@ import (
 	"super-app-chonburi-go/pkg/jwtutil"
 
 	"github.com/gofiber/fiber/v3"
-	"github.com/google/uuid"
 )
 
 type AdminHandler struct {
@@ -18,7 +17,7 @@ func NewAdminHandler(adminUseCase domain.AdminUseCase) *AdminHandler {
 }
 
 func (h *AdminHandler) RegisterRoutes(router fiber.Router) {
-	group := router.Group("/admins")
+	group := router.Group("/admins", jwtutil.RequireAuth())
 	group.Get("", h.GetAdmins)
 	group.Get("/:id", h.GetAdminByID)
 	group.Post("", h.CreateAdmin)
@@ -46,9 +45,9 @@ func (h *AdminHandler) GetAdmins(c fiber.Ctx) error {
 }
 
 func (h *AdminHandler) GetAdminByID(c fiber.Ctx) error {
-	id, err := uuid.Parse(c.Params("id"))
-	if err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid ID format"})
+	id := c.Params("id")
+	if id == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "ID is required"})
 	}
 
 	admin, err := h.adminUseCase.GetAdminByID(id)
@@ -65,12 +64,6 @@ func (h *AdminHandler) CreateAdmin(c fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "JSON Bind Error: " + err.Error()})
 	}
 
-	// Set Audit fields
-	if user, ok := c.Locals("user").(*jwtutil.CustomClaims); ok {
-		admin.CreatedBy = user.Name
-		admin.UpdatedBy = user.Name
-	}
-
 	if err := h.adminUseCase.CreateAdmin(&admin); err != nil {
 		if err.Error() == "email already exists" {
 			return c.Status(fiber.StatusConflict).JSON(fiber.Map{"error": err.Error()})
@@ -78,42 +71,29 @@ func (h *AdminHandler) CreateAdmin(c fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
 
-	return SuccessResponse(c, admin, fiber.StatusCreated)
+	return SuccessResponse(c, admin)
 }
 
 func (h *AdminHandler) UpdateAdmin(c fiber.Ctx) error {
-	id, err := uuid.Parse(c.Params("id"))
-	if err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid ID format"})
-	}
-
+	id := c.Params("id")
 	var admin domain.Admin
 	if err := c.Bind().JSON(&admin); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid input"})
 	}
 	admin.ID = id
 
-	// Set Audit fields
-	if user, ok := c.Locals("user").(*jwtutil.CustomClaims); ok {
-		admin.UpdatedBy = user.Name
-	}
-
 	if err := h.adminUseCase.UpdateAdmin(&admin); err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
 
-	return SuccessResponse(c, admin, fiber.StatusOK)
+	return SuccessResponse(c, admin)
 }
 
 func (h *AdminHandler) DeleteAdmin(c fiber.Ctx) error {
-	id, err := uuid.Parse(c.Params("id"))
-	if err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid ID format"})
-	}
-
+	id := c.Params("id")
 	if err := h.adminUseCase.DeleteAdmin(id); err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
 
-	return SuccessResponse(c, nil, fiber.StatusOK)
+	return SuccessResponse(c, fiber.Map{"status": "deleted"})
 }

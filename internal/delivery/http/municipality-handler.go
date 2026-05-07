@@ -16,12 +16,10 @@ func NewMunicipalityHandler(uc domain.MunicipalityUseCase) *MunicipalityHandler 
 	return &MunicipalityHandler{uc: uc}
 }
 
-func (h *MunicipalityHandler) RegisterRoutes(app *fiber.App) {
-	api := app.Group("/api/v1")
+func (h *MunicipalityHandler) RegisterRoutes(router fiber.Router) {
+	router.Get("/municipality/public", h.GetPublicInfo)
 
-	api.Get("/municipality/public", h.GetPublicInfo)
-
-	muni := api.Group("/municipalities")
+	muni := router.Group("/municipalities")
 	muni.Use(jwtutil.RequireAuth())
 	
 	muni.Get("/", h.GetList)

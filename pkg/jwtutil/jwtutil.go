@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"super-app-chonburi-go/internal/domain"
+
 	"github.com/gofiber/fiber/v3"
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -27,12 +28,38 @@ func secretKey() []byte {
 }
 
 func GenerateToken(user domain.User) (string, error) {
+	// Try to get Name if user is domain.Admin
+	name := ""
+	permissions := []string{}
+	if admin, ok := user.(*domain.Admin); ok {
+		name = admin.Name + " " + admin.LastName
+
+		// 1. If superadmin, add system permissions
+		if admin.Role != nil && (admin.Role.Type == "superadmin" || admin.Role.Type == "super_admin") {
+			permissions = append(permissions, "MANAGE_CITY", "MANAGE_ADMINS", "MANAGE_DEPARTMENTS", "VIEW_ALL_REPORTS")
+		}
+
+		// 2. Add permissions from assigned modules
+		uniqueKeys := make(map[string]bool)
+		for _, dept := range admin.Departments {
+			for _, module := range dept.Modules {
+				if module.Key != nil && *module.Key != "" {
+					uniqueKeys[*module.Key] = true
+				}
+			}
+		}
+
+		for key := range uniqueKeys {
+			permissions = append(permissions, key)
+		}
+	}
+
 	claims := CustomClaims{
-		ID:          user.ID,
-		Email:       user.Email,
-		Name:        user.Name,
-		Role:        user.Role,
-		Permissions: user.Permissions,
+		ID:          user.GetID(),
+		Email:       user.GetEmail(),
+		Name:        name,
+		Role:        user.GetRole(),
+		Permissions: permissions,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),

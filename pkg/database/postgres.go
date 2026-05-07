@@ -18,7 +18,7 @@ func ConnectDB(cfg *config.Config) {
 	var err error
 
 	DB, err = gorm.Open(postgres.Open(cfg.DBDsn), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Silent),
+		Logger: logger.Default.LogMode(logger.Info),
 	})
 
 	if err != nil {
@@ -36,18 +36,18 @@ func ConnectDB(cfg *config.Config) {
 
 	DB.Exec("CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\"")
 
+	log.Println("Migrating fresh MueangSmart schema (snake_case)...")
 	err = DB.AutoMigrate(
 		&domain.AdminRole{},
-		&domain.Admin{},
+		&domain.Module{},
+		&domain.ModuleType{},
 		&domain.Department{},
-		&domain.SystemPermission{},
-		&domain.Municipality{},
-		&domain.MunicipalityBank{},
-		&domain.CityShift{},
-		&domain.ActivityLog{},
+		&domain.DepartmentModule{},
+		&domain.DepartmentModuleModuleType{},
+		&domain.Admin{},
 		&domain.AdminRefreshToken{},
+		&domain.AuditLog{},
 		&domain.Complaint{},
-		&domain.ComplaintUserInformation{},
 		&domain.ComplaintImage{},
 		&domain.ComplaintActivity{},
 		&domain.ComplaintActivityImage{},
@@ -56,5 +56,8 @@ func ConnectDB(cfg *config.Config) {
 		log.Fatalf("Fatal: Failed to auto-migrate: %v", err)
 	}
 
-	log.Println("Database Connected & Migrated")
+	// Trigger Seeding
+	Seed()
+
+	log.Println("Database initialized and seeded successfully.")
 }

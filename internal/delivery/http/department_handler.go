@@ -1,131 +1,95 @@
 package http
 
 import (
-	"strconv"
-
-	"github.com/google/uuid"
-	"github.com/gofiber/fiber/v3"
 	"super-app-chonburi-go/internal/domain"
 	"super-app-chonburi-go/pkg/jwtutil"
+
+	"github.com/gofiber/fiber/v3"
 )
 
 type DepartmentHandler struct {
-	useCase domain.DepartmentUseCase
+	uc domain.DepartmentUseCase
 }
 
-func NewDepartmentHandler(useCase domain.DepartmentUseCase) *DepartmentHandler {
-	return &DepartmentHandler{useCase}
+func NewDepartmentHandler(uc domain.DepartmentUseCase) *DepartmentHandler {
+	return &DepartmentHandler{uc: uc}
 }
 
 func (h *DepartmentHandler) RegisterRoutes(router fiber.Router) {
-	group := router.Group("/departments")
-	group.Get("/", h.GetAll)
-	group.Get("/list", h.GetList)
+	group := router.Group("/departments", jwtutil.RequireAuth())
+	group.Get("", h.GetDepartments)
+	group.Get("/all", h.GetDepartmentsAll)
+	group.Get("/list", h.GetDepartmentsAll) // Alias for frontend
 	group.Get("/:id", h.GetByID)
-	group.Post("/", h.Create)
+	group.Post("", h.Create)
 	group.Put("/:id", h.Update)
 	group.Delete("/:id", h.Delete)
 }
 
-func (h *DepartmentHandler) GetAll(c fiber.Ctx) error {
-	page, _ := strconv.Atoi(c.Query("page", "1"))
-	size, _ := strconv.Atoi(c.Query("size", "10"))
-	name := c.Query("name")
-	status := c.Query("status")
-
-	res, err := h.useCase.GetDepartments(domain.DepartmentQuery{
-		PageNumber: page,
-		PageSize:   size,
-		Name:       name,
-		Status:     status,
-	})
-	if err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+func (h *DepartmentHandler) GetDepartments(c fiber.Ctx) error {
+	var query domain.DepartmentQuery
+	if err := c.Bind().Query(&query); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid query parameters"})
 	}
 
-	return c.JSON(fiber.Map{
-		"success": true,
-		"data":    res,
-	})
+	result, err := h.uc.GetDepartments(query)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	return c.JSON(fiber.Map{"success": true, "data": result})
 }
 
-func (h *DepartmentHandler) GetList(c fiber.Ctx) error {
-	depts, err := h.useCase.GetAllDepartments()
+func (h *DepartmentHandler) GetDepartmentsAll(c fiber.Ctx) error {
+	result, err := h.uc.GetAllDepartments()
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
-	return c.JSON(fiber.Map{"success": true, "data": depts})
+	return c.JSON(fiber.Map{"success": true, "data": result})
 }
 
 func (h *DepartmentHandler) GetByID(c fiber.Ctx) error {
-	id, err := uuid.Parse(c.Params("id"))
+	id := c.Params("id")
+	result, err := h.uc.GetDepartmentByID(id)
 	if err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "Invalid ID"})
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "department not found"})
 	}
-
-	dept, err := h.useCase.GetDepartmentByID(id)
-	if err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
-	}
-	if dept == nil {
-		return c.Status(404).JSON(fiber.Map{"error": "Department not found"})
-	}
-
-	return c.JSON(fiber.Map{"success": true, "data": dept})
+	return c.JSON(fiber.Map{"success": true, "data": result})
 }
 
 func (h *DepartmentHandler) Create(c fiber.Ctx) error {
-	var dept domain.Department
-	if err := c.Bind().Body(&dept); err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
+	var req domain.Department
+	if err := c.Bind().JSON(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
 	}
 
-	// Set Audit fields
-	if user, ok := c.Locals("user").(*jwtutil.CustomClaims); ok {
-		dept.CreatedBy = user.Name
-		dept.UpdatedBy = user.Name
+	req.ID = domain.NewUUID()
+	if err := h.uc.CreateDepartment(&req); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
 
-	if err := h.useCase.CreateDepartment(&dept); err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
-	}
-
-	return c.Status(201).JSON(fiber.Map{"success": true, "data": dept})
+	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"success": true, "data": req})
 }
 
 func (h *DepartmentHandler) Update(c fiber.Ctx) error {
-	id, err := uuid.Parse(c.Params("id"))
-	if err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "Invalid ID"})
+	id := c.Params("id")
+	var req domain.Department
+	if err := c.Bind().JSON(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
 	}
 
-	var dept domain.Department
-	if err := c.Bind().Body(&dept); err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
-	}
-	dept.ID = id
-
-	// Set Audit fields
-	if user, ok := c.Locals("user").(*jwtutil.CustomClaims); ok {
-		dept.UpdatedBy = user.Name
+	req.ID = id
+	if err := h.uc.UpdateDepartment(&req); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
 
-	if err := h.useCase.UpdateDepartment(&dept); err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
-	}
-
-	return c.JSON(fiber.Map{"success": true, "data": dept})
+	return c.JSON(fiber.Map{"success": true, "data": req})
 }
 
 func (h *DepartmentHandler) Delete(c fiber.Ctx) error {
-	id, err := uuid.Parse(c.Params("id"))
-	if err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "Invalid ID"})
+	id := c.Params("id")
+	if err := h.uc.DeleteDepartment(id); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
-
-	if err := h.useCase.DeleteDepartment(id); err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
-	}
-
-	return c.JSON(fiber.Map{"success": true, "message": "Deleted successfully"})
+	return c.JSON(fiber.Map{"success": true, "message": "deleted successfully"})
 }
