@@ -3,8 +3,8 @@ package usecase
 import (
 	"errors"
 	"super-app-chonburi-go/internal/domain"
+	"time"
 
-	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -26,7 +26,7 @@ func (u *adminUseCase) GetAdmins(query domain.AdminQuery) (*domain.PaginatedAdmi
 	return u.adminRepo.GetPaginated(query)
 }
 
-func (u *adminUseCase) GetAdminByID(id uuid.UUID) (*domain.Admin, error) {
+func (u *adminUseCase) GetAdminByID(id string) (*domain.Admin, error) {
 	admin, err := u.adminRepo.GetByID(id)
 	if err != nil {
 		return nil, err
@@ -38,28 +38,36 @@ func (u *adminUseCase) GetAdminByID(id uuid.UUID) (*domain.Admin, error) {
 }
 
 func (u *adminUseCase) CreateAdmin(admin *domain.Admin) error {
+	if admin.Email == "" {
+		return errors.New("email is required")
+	}
+	if admin.Password == "" {
+		return errors.New("password is required")
+	}
+
 	existingAdmin, _ := u.adminRepo.GetByEmail(admin.Email)
 	if existingAdmin != nil {
 		return errors.New("email already exists")
 	}
 
 	if admin.Password != "" {
-		hash, err := bcrypt.GenerateFromPassword([]byte(admin.Password), bcrypt.DefaultCost)
+		hashed, err := bcrypt.GenerateFromPassword([]byte(admin.Password), bcrypt.DefaultCost)
 		if err != nil {
 			return err
 		}
-		admin.PasswordHash = string(hash)
-	} else if admin.PasswordHash == "" {
-		return errors.New("password is required")
+		admin.PasswordHash = string(hashed)
 	}
 
-	// Map DepartmentIDs to struct slice
-	admin.Departments = make([]domain.Department, len(admin.DepartmentIDs))
-	for i, idStr := range admin.DepartmentIDs {
-		id, err := uuid.Parse(idStr)
-		if err == nil {
-			admin.Departments[i] = domain.Department{ID: id}
-		}
+	admin.ID = domain.NewUUID()
+	admin.CreatedBy = "system"
+	admin.UpdatedBy = "system"
+	admin.CreatedDate = time.Now()
+	admin.UpdatedDate = time.Now()
+
+	// Map Department IDs to objects
+	admin.Departments = []domain.Department{}
+	for _, deptID := range admin.DepartmentIds {
+		admin.Departments = append(admin.Departments, domain.Department{ID: deptID})
 	}
 
 	return u.adminRepo.Create(admin)
@@ -67,48 +75,36 @@ func (u *adminUseCase) CreateAdmin(admin *domain.Admin) error {
 
 func (u *adminUseCase) UpdateAdmin(admin *domain.Admin) error {
 	existingAdmin, err := u.adminRepo.GetByID(admin.ID)
-	if err != nil {
+	if err != nil || existingAdmin == nil {
 		return errors.New("admin not found")
-	}
-
-	// Avoid email conflict
-	if admin.Email != existingAdmin.Email {
-		conflictAdmin, _ := u.adminRepo.GetByEmail(admin.Email)
-		if conflictAdmin != nil {
-			return errors.New("email already in use")
-		}
 	}
 
 	existingAdmin.Email = admin.Email
 	existingAdmin.Name = admin.Name
 	existingAdmin.LastName = admin.LastName
-	existingAdmin.Username = admin.Username
-	existingAdmin.PhoneNumber = admin.PhoneNumber
+	existingAdmin.Phone = admin.Phone
 	existingAdmin.Position = admin.Position
-	existingAdmin.Status = admin.Status
-	existingAdmin.RoleID = admin.RoleID
-	existingAdmin.UpdatedBy = admin.UpdatedBy
-	
-	// Map DepartmentIDs to struct slice
-	existingAdmin.Departments = make([]domain.Department, len(admin.DepartmentIDs))
-	for i, idStr := range admin.DepartmentIDs {
-		id, err := uuid.Parse(idStr)
-		if err == nil {
-			existingAdmin.Departments[i] = domain.Department{ID: id}
-		}
-	}
+	existingAdmin.RoleId = admin.RoleId
+	existingAdmin.UpdatedBy = "system"
+	existingAdmin.UpdatedDate = time.Now()
 
 	if admin.Password != "" {
-		hash, err := bcrypt.GenerateFromPassword([]byte(admin.Password), bcrypt.DefaultCost)
+		hashed, err := bcrypt.GenerateFromPassword([]byte(admin.Password), bcrypt.DefaultCost)
 		if err != nil {
 			return err
 		}
-		existingAdmin.PasswordHash = string(hash)
+		existingAdmin.PasswordHash = string(hashed)
+	}
+
+	// Map Department IDs to objects
+	existingAdmin.Departments = []domain.Department{}
+	for _, deptID := range admin.DepartmentIds {
+		existingAdmin.Departments = append(existingAdmin.Departments, domain.Department{ID: deptID})
 	}
 
 	return u.adminRepo.Update(existingAdmin)
 }
 
-func (u *adminUseCase) DeleteAdmin(id uuid.UUID) error {
+func (u *adminUseCase) DeleteAdmin(id string) error {
 	return u.adminRepo.Delete(id)
 }

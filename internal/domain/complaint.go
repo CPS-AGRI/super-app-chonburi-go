@@ -2,12 +2,8 @@ package domain
 
 import (
 	"time"
-
-	"github.com/google/uuid"
-	"gorm.io/gorm"
 )
 
-// Complaint Statuses
 const (
 	ComplaintStatusReceived   = "Received"
 	ComplaintStatusInProgress = "InProgress"
@@ -15,152 +11,117 @@ const (
 	ComplaintStatusRejected   = "Rejected"
 )
 
-// ComplaintUserInformation represents the citizen who submitted the complaint
-type ComplaintUserInformation struct {
-	ID             uuid.UUID `gorm:"type:uuid;primaryKey;default:uuid_generate_v4()" json:"id"`
-	ComplaintID    uuid.UUID `gorm:"type:uuid;index;not null;constraint:OnDelete:CASCADE" json:"complaintId"`
-	UserID         *string   `json:"userId"` // Optional, for future mobile app linking
-	Prefix         string    `json:"prefix"`
-	Name           string    `json:"name"`
-	LastName       string    `json:"lastName"`
-	Phone          string    `json:"phone"`
-	IdentityNumber string    `json:"identityNumber"`
-}
-
-// Complaint represents a single complaint document
+// module_complaints
 type Complaint struct {
-	ID            uuid.UUID `gorm:"type:uuid;primaryKey;default:uuid_generate_v4()" json:"id"`
-	DocumentID    string    `gorm:"uniqueIndex;not null" json:"documentId"` // Auto-generated CMP-YYYYMMDD-XXXX
-	PermissionID  string    `gorm:"not null;index" json:"permissionId"`     // Maps to SystemPermission.ID (The topic/sub-module)
-	Latitude      string    `json:"latitude"`
-	Longitude     string    `json:"longitude"`
-	GoogleMapsUrl string    `json:"googleMapsUrl"`
-	Description   string    `gorm:"type:text" json:"description"`
-	Status        string    `gorm:"not null;default:'Received'" json:"status"`
-
-	// Foreign Keys to Admins
-	AssignerID *uuid.UUID `gorm:"type:uuid;index" json:"assignerId"`   // The Manager who assigned it
-	AssigneeID *uuid.UUID `gorm:"type:uuid;index" json:"assigneeId"`   // The Employee working on it
-	RejectedByID *uuid.UUID `gorm:"type:uuid;index" json:"rejectedById"` // The Manager who rejected it
+	ID                string         `gorm:"type:uuid;primaryKey;column:id" json:"id"`
+	ModuleTypeId      string         `gorm:"type:uuid;index;not null;column:module_type_id" json:"module_type_id"`
+	UserId            string         `gorm:"type:uuid;index;not null;column:user_id" json:"user_id"`
+	DocumentId        string         `gorm:"not null;column:document_id;index" json:"document_id"`
+	Description       string         `gorm:"type:text;column:description" json:"description"`
+	Latitude          float64        `gorm:"column:latitude" json:"latitude"`
+	Longitude         float64        `gorm:"column:longitude" json:"longitude"`
+	Status            string         `gorm:"not null;column:status;index" json:"status"`
+	AssignerId        *string        `gorm:"type:uuid;index;column:assigner_id" json:"assigner_id"`
+	AssigneeId        *string        `gorm:"type:uuid;index;column:assignee_id" json:"assignee_id"`
+	CreatedDate       time.Time      `gorm:"not null;type:timestamptz;column:created_date;index" json:"created_at"`
+	UpdatedDate       time.Time      `gorm:"not null;type:timestamptz;column:updated_date" json:"updated_at"`
+	CreatedBy         string         `gorm:"not null;column:created_by" json:"created_by"`
+	UpdatedBy         string         `gorm:"not null;column:updated_by" json:"updated_by"`
+	DepartmentId      *string        `gorm:"type:uuid;index;column:department_id" json:"department_id"`
+	IsOtherModuleType bool           `gorm:"not null;default:false;column:is_other_module_type" json:"is_other_module_type"`
 
 	// Relations
-	Assigner   *Admin `gorm:"foreignKey:AssignerID" json:"assigner,omitempty"`
-	Assignee   *Admin `gorm:"foreignKey:AssigneeID" json:"assignee,omitempty"`
-	RejectedBy *Admin `gorm:"foreignKey:RejectedByID" json:"rejectedBy,omitempty"`
-	Permission *SystemPermission `gorm:"foreignKey:PermissionID;references:ID" json:"permission,omitempty"`
-
-	UserInformation *ComplaintUserInformation `gorm:"foreignKey:ComplaintID" json:"userInformation,omitempty"`
-	Images          []ComplaintImage          `gorm:"foreignKey:ComplaintID;constraint:OnDelete:CASCADE" json:"images,omitempty"`
-	Activities      []ComplaintActivity       `gorm:"foreignKey:ComplaintID;constraint:OnDelete:CASCADE" json:"activities,omitempty"`
-
-	CreatedBy string         `json:"createdBy"`
-	UpdatedBy string         `json:"updatedBy"`
-	CreatedAt time.Time      `json:"createdAt"`
-	UpdatedAt time.Time      `json:"updatedAt"`
-	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
+	ModuleType *ModuleType         `gorm:"foreignKey:ModuleTypeId" json:"module_type,omitempty"`
+	Department *Department         `gorm:"foreignKey:DepartmentId" json:"department,omitempty"`
+	Images     []ComplaintImage    `gorm:"foreignKey:ModuleComplaintId" json:"images,omitempty"`
+	Activities []ComplaintActivity `gorm:"foreignKey:ModuleComplaintId" json:"activities,omitempty"`
 }
 
-// ComplaintImage represents an image attached to the complaint when initially submitted
+func (Complaint) TableName() string { return "module_complaints" }
+
+// module_complaint_images
 type ComplaintImage struct {
-	ID          uuid.UUID `gorm:"type:uuid;primaryKey;default:uuid_generate_v4()" json:"id"`
-	ComplaintID uuid.UUID `gorm:"type:uuid;index;not null" json:"complaintId"`
-	URL         string    `gorm:"not null" json:"url"`
-	Sequence    int       `gorm:"not null;default:0" json:"sequence"`
+	ID                string    `gorm:"type:uuid;primaryKey;column:id" json:"id"`
+	ModuleComplaintId string    `gorm:"type:uuid;index;not null;column:module_complaint_id" json:"module_complaint_id"`
+	Url               string    `gorm:"not null;column:url" json:"url"`
+	Sequence          int       `gorm:"not null;column:sequence" json:"sequence"`
+	CreatedDate       time.Time `gorm:"not null;type:timestamptz;column:created_date" json:"created_at"`
+	UpdatedDate       time.Time `gorm:"not null;type:timestamptz;column:updated_date" json:"updated_at"`
+	CreatedBy         string    `gorm:"not null;column:created_by" json:"created_by"`
+	UpdatedBy         string    `gorm:"not null;column:updated_by" json:"updated_by"`
 }
 
-// ComplaintActivity represents an update/action taken on the complaint
+func (ComplaintImage) TableName() string { return "module_complaint_images" }
+
+// module_complaint_activities
 type ComplaintActivity struct {
-	ID          uuid.UUID `gorm:"type:uuid;primaryKey;default:uuid_generate_v4()" json:"id"`
-	ComplaintID uuid.UUID `gorm:"type:uuid;index;not null" json:"complaintId"`
-	Description string    `gorm:"type:text" json:"description"`
-	Status      string    `gorm:"not null" json:"status"` // Status of the complaint at this activity
+	ID                string    `gorm:"type:uuid;primaryKey;column:id" json:"id"`
+	ModuleComplaintId string    `gorm:"type:uuid;index;not null;column:module_complaint_id" json:"module_complaint_id"`
+	Description       string    `gorm:"type:text;column:description" json:"description"`
+	Status            string    `gorm:"column:status;index" json:"status"`
+	CreatedDate       time.Time `gorm:"not null;type:timestamptz;column:created_date" json:"created_at"`
+	UpdatedDate       time.Time `gorm:"not null;type:timestamptz;column:updated_date" json:"updated_at"`
+	CreatedBy         string    `gorm:"not null;column:created_by" json:"created_by"`
+	UpdatedBy         string    `gorm:"not null;column:updated_by" json:"updated_by"`
 
-	// The Admin who made the update (Employee or Manager)
-	AdminID *uuid.UUID `gorm:"type:uuid;index" json:"adminId"`
-	Admin   *Admin     `gorm:"foreignKey:AdminID" json:"admin,omitempty"`
-
-	Images []ComplaintActivityImage `gorm:"foreignKey:ActivityID;constraint:OnDelete:CASCADE" json:"images,omitempty"`
-
-	CreatedBy string    `json:"createdBy"`
-	UpdatedBy string    `json:"updatedBy"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	Images []ComplaintActivityImage `gorm:"foreignKey:ModuleComplaintActivityId" json:"images,omitempty"`
 }
 
-// ComplaintActivityImage represents an image attached to an activity update
+func (ComplaintActivity) TableName() string { return "module_complaint_activities" }
+
+// module_complaint_activity_images
 type ComplaintActivityImage struct {
-	ID         uuid.UUID `gorm:"type:uuid;primaryKey;default:uuid_generate_v4()" json:"id"`
-	ActivityID uuid.UUID `gorm:"type:uuid;index;not null" json:"activityId"`
-	URL        string    `gorm:"not null" json:"url"`
-	Sequence   int       `gorm:"not null;default:0" json:"sequence"`
+	ID                        string    `gorm:"type:uuid;primaryKey;column:id" json:"id"`
+	ModuleComplaintActivityId string    `gorm:"type:uuid;index;not null;column:module_complaint_activity_id" json:"module_complaint_activity_id"`
+	Url                       string    `gorm:"not null;column:url" json:"url"`
+	Sequence                  int       `gorm:"not null;column:sequence" json:"sequence"`
+	CreatedDate               time.Time `gorm:"not null;type:timestamptz;column:created_date" json:"created_at"`
+	UpdatedDate               time.Time `gorm:"not null;type:timestamptz;column:updated_date" json:"updated_at"`
+	CreatedBy                 string    `gorm:"not null;column:created_by" json:"created_by"`
+	UpdatedBy                 string    `gorm:"not null;column:updated_by" json:"updated_by"`
 }
 
-// --- Table Names ---
+func (ComplaintActivityImage) TableName() string { return "module_complaint_activity_images" }
 
-func (ComplaintUserInformation) TableName() string {
-	return "module_complaint_user_informations"
-}
-
-func (Complaint) TableName() string {
-	return "module_complaints"
-}
-
-func (ComplaintImage) TableName() string {
-	return "module_complaint_images"
-}
-
-func (ComplaintActivity) TableName() string {
-	return "module_complaint_activities"
-}
-
-func (ComplaintActivityImage) TableName() string {
-	return "module_complaint_activity_images"
-}
-
-// --- Interfaces ---
-
+// Interfaces
 type ComplaintQuery struct {
 	PageNumber int
 	PageSize   int
 	Status     []string
-	AssigneeID *uuid.UUID
+	AssigneeId *string
 
-	// Internally used for filtering based on logged-in user's department
-	AllowedPermissionIDs []string
+	AllowedModuleTypeIDs []string
 	IsSuperAdmin         bool
+	IsComplaintCenter    bool
 }
 
 type PaginatedComplaintResponse struct {
 	Items       []Complaint `json:"items"`
-	TotalItems  int64       `json:"totalItems"`
-	PageNumber  int         `json:"pageNumber"`
-	PageSize    int         `json:"pageSize"`
-	TotalPages  int         `json:"totalPages"`
-	HasNext     bool        `json:"hasNext"`
-	HasPrevious bool        `json:"hasPrevious"`
+	TotalItems  int64       `json:"total_items"`
+	PageNumber  int         `json:"page_number"`
+	PageSize    int         `json:"page_size"`
+	TotalPages  int         `json:"total_pages"`
+	HasNext     bool        `json:"has_next"`
+	HasPrevious bool        `json:"has_previous"`
 }
 
 type ComplaintRepository interface {
 	GetPaginated(query ComplaintQuery) (*PaginatedComplaintResponse, error)
-	GetByID(id uuid.UUID, allowedPermissionIDs []string, isSuperAdmin bool) (*Complaint, error)
+	GetByID(id string, allowedModuleTypeIDs []string, isSuperAdmin bool) (*Complaint, error)
 	Create(complaint *Complaint) error
 	Update(complaint *Complaint) error
 	CreateActivity(activity *ComplaintActivity) error
-	Delete(id uuid.UUID) error
+	Delete(id string) error
 }
 
 type ComplaintUseCase interface {
-	GetComplaints(query ComplaintQuery, adminID uuid.UUID) (*PaginatedComplaintResponse, error)
-	GetComplaintByID(id uuid.UUID, adminID uuid.UUID) (*Complaint, error)
-	
-	// Called by Mock Citizen (or Real Citizen later)
+	GetComplaints(query ComplaintQuery, adminID string) (*PaginatedComplaintResponse, error)
+	GetComplaintByID(id string, adminID string) (*Complaint, error)
 	CreateComplaint(complaint *Complaint) error
-	
-	// Called by Managers
-	AssignComplaint(id uuid.UUID, assignerID uuid.UUID, assigneeID uuid.UUID) error
-	RejectComplaint(id uuid.UUID, rejecterID uuid.UUID, reason string) error
-	
-	// Called by Employees
-	AddActivity(activity *ComplaintActivity, adminID uuid.UUID) error
-	DeleteComplaint(id uuid.UUID, adminID uuid.UUID) error
+	UpdateComplaintStatus(id string, status string, description string, adminID string, images []string) error
+	ForwardComplaint(id string, departmentID string, adminID string) error
+	AssignComplaint(id string, assigneeID string, adminID string) error
+	RejectComplaint(id string, reason string, adminID string) error
+	AddActivity(activity *ComplaintActivity, adminID string) error
+	DeleteComplaint(id string) error
 }

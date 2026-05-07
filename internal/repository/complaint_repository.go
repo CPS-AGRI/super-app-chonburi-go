@@ -2,10 +2,8 @@ package repository
 
 import (
 	"errors"
-	"math"
 	"super-app-chonburi-go/internal/domain"
 
-	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
@@ -19,107 +17,60 @@ func NewComplaintRepository(db *gorm.DB) domain.ComplaintRepository {
 
 func (r *complaintRepository) GetPaginated(query domain.ComplaintQuery) (*domain.PaginatedComplaintResponse, error) {
 	var complaints []domain.Complaint
-	var totalItems int64
+	var total int64
 
-	dbQuery := r.db.Model(&domain.Complaint{})
+	db := r.db.Model(&domain.Complaint{})
 
-	// Apply filtering for PermissionIDs if not SuperAdmin
+	// Apply Filters
+	if len(query.Status) > 0 {
+		db = db.Where("status IN ?", query.Status)
+	}
+	if query.AssigneeId != nil {
+		db = db.Where("assignee_id = ?", *query.AssigneeId)
+	}
 	if !query.IsSuperAdmin {
-		if query.AssigneeID != nil {
-			dbQuery = dbQuery.Where("assignee_id = ?", query.AssigneeID)
-		} else {
-			if len(query.AllowedPermissionIDs) == 0 {
-				// User has no permissions, return empty immediately
-				return &domain.PaginatedComplaintResponse{
-					Items:       []domain.Complaint{},
-					TotalItems:  0,
-					PageNumber:  query.PageNumber,
-					PageSize:    query.PageSize,
-					TotalPages:  0,
-					HasNext:     false,
-					HasPrevious: false,
-				}, nil
-			}
-			dbQuery = dbQuery.Where("permission_id IN ?", query.AllowedPermissionIDs)
+		if len(query.AllowedModuleTypeIDs) > 0 {
+			db = db.Where("module_type_id IN ?", query.AllowedModuleTypeIDs)
 		}
 	}
 
-	// Apply status filter
-	if len(query.Status) > 0 {
-		dbQuery = dbQuery.Where("status IN ?", query.Status)
-	}
+	db.Count(&total)
 
-	// Apply assignee filter if it wasn't already handled above
-	if query.AssigneeID != nil && query.IsSuperAdmin {
-		dbQuery = dbQuery.Where("assignee_id = ?", query.AssigneeID)
-	}
-
-	// Count total
-	if err := dbQuery.Count(&totalItems).Error; err != nil {
-		return nil, err
-	}
-
-	// Pagination
 	offset := (query.PageNumber - 1) * query.PageSize
-	
-	// Fetch items with relations
-	err := dbQuery.
-		Preload("Permission").
-		Preload("Assigner").
-		Preload("Assignee").
-		Preload("UserInformation").
-		Order("created_at desc").
-		Offset(offset).
-		Limit(query.PageSize).
+	err := db.Preload("ModuleType").
+		Preload("Department").
+		Preload("Images").
+		Offset(offset).Limit(query.PageSize).
+		Order("created_date DESC").
 		Find(&complaints).Error
 
-	if err != nil {
-		return nil, err
-	}
-
-	totalPages := int(math.Ceil(float64(totalItems) / float64(query.PageSize)))
-
 	return &domain.PaginatedComplaintResponse{
-		Items:       complaints,
-		TotalItems:  totalItems,
-		PageNumber:  query.PageNumber,
-		PageSize:    query.PageSize,
-		TotalPages:  totalPages,
-		HasNext:     query.PageNumber < totalPages,
+		Items:      complaints,
+		TotalItems: total,
+		PageNumber: query.PageNumber,
+		PageSize:   query.PageSize,
+		TotalPages: int((total + int64(query.PageSize) - 1) / int64(query.PageSize)),
+		HasNext:    total > int64(query.PageNumber*query.PageSize),
 		HasPrevious: query.PageNumber > 1,
-	}, nil
+	}, err
 }
 
-func (r *complaintRepository) GetByID(id uuid.UUID, allowedPermissionIDs []string, isSuperAdmin bool) (*domain.Complaint, error) {
+func (r *complaintRepository) GetByID(id string, allowedModuleTypeIDs []string, isSuperAdmin bool) (*domain.Complaint, error) {
 	var complaint domain.Complaint
-	
-	dbQuery := r.db.
-		Preload("Permission").
-		Preload("Assigner").
-		Preload("Assignee").
-		Preload("RejectedBy").
-		Preload("UserInformation").
+	db := r.db.Preload("ModuleType").
+		Preload("Department").
 		Preload("Images").
 		Preload("Activities").
-		Preload("Activities.Admin").
-		Preload("Activities.Images").
-		Where("id = ?", id)
+		Preload("Activities.Images")
 
-	if !isSuperAdmin {
-		if len(allowedPermissionIDs) == 0 {
-			return nil, gorm.ErrRecordNotFound
-		}
-		dbQuery = dbQuery.Where("permission_id IN ?", allowedPermissionIDs)
-	}
-
-	err := dbQuery.First(&complaint).Error
+	err := db.First(&complaint, "id = ?", id).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
 		}
 		return nil, err
 	}
-	
+
 	return &complaint, nil
 }
 
@@ -135,6 +86,6 @@ func (r *complaintRepository) CreateActivity(activity *domain.ComplaintActivity)
 	return r.db.Create(activity).Error
 }
 
-func (r *complaintRepository) Delete(id uuid.UUID) error {
+func (r *complaintRepository) Delete(id string) error {
 	return r.db.Delete(&domain.Complaint{}, "id = ?", id).Error
 }

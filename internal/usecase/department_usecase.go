@@ -1,8 +1,8 @@
 package usecase
 
 import (
-	"github.com/google/uuid"
 	"super-app-chonburi-go/internal/domain"
+	"time"
 )
 
 type departmentUseCase struct {
@@ -27,18 +27,22 @@ func (u *departmentUseCase) GetAllDepartments() ([]domain.Department, error) {
 	return u.deptRepo.GetAll()
 }
 
-func (u *departmentUseCase) GetDepartmentByID(id uuid.UUID) (*domain.Department, error) {
+func (u *departmentUseCase) GetDepartmentByID(id string) (*domain.Department, error) {
 	return u.deptRepo.GetByID(id)
 }
 
 func (u *departmentUseCase) CreateDepartment(dept *domain.Department) error {
+	dept.ID = domain.NewUUID()
+	dept.CreatedDate = time.Now()
+	dept.UpdatedDate = time.Now()
 	return u.deptRepo.Create(dept)
 }
 
 func (u *departmentUseCase) UpdateDepartment(dept *domain.Department) error {
+	dept.UpdatedDate = time.Now()
 	return u.deptRepo.Update(dept)
 }
 
-func (u *departmentUseCase) DeleteDepartment(id uuid.UUID) error {
+func (u *departmentUseCase) DeleteDepartment(id string) error {
 	return u.deptRepo.Delete(id)
 }

@@ -1,10 +1,8 @@
 package usecase
 
 import (
-	"errors"
 	"super-app-chonburi-go/internal/domain"
-
-	"github.com/google/uuid"
+	"time"
 )
 
 type complaintUseCase struct {
@@ -19,151 +17,158 @@ func NewComplaintUseCase(complaintRepo domain.ComplaintRepository, adminRepo dom
 	}
 }
 
-// Helper function to resolve permissions allowed for the admin
-func (u *complaintUseCase) resolveAdminPermissions(adminID uuid.UUID) ([]string, bool, error) {
+func (u *complaintUseCase) GetComplaints(query domain.ComplaintQuery, adminID string) (*domain.PaginatedComplaintResponse, error) {
 	admin, err := u.adminRepo.GetByID(adminID)
-	if err != nil {
-		return nil, false, err
-	}
-	if admin == nil {
-		return nil, false, errors.New("admin not found")
-	}
-
-	isSuperAdmin := admin.Role != nil && admin.Role.IsSuperAdmin
-
-	if isSuperAdmin {
-		return nil, true, nil
-	}
-
-	// Collect unique permissions from all departments
-	permMap := make(map[string]bool)
-	for _, dept := range admin.Departments {
-		for _, perm := range dept.Permissions {
-			permMap[perm.ID] = true
-		}
-	}
-
-	var allowedPerms []string
-	for p := range permMap {
-		allowedPerms = append(allowedPerms, p)
-	}
-
-	return allowedPerms, false, nil
-}
-
-func (u *complaintUseCase) GetComplaints(query domain.ComplaintQuery, adminID uuid.UUID) (*domain.PaginatedComplaintResponse, error) {
-	allowedPerms, isSuperAdmin, err := u.resolveAdminPermissions(adminID)
 	if err != nil {
 		return nil, err
 	}
 
-	query.AllowedPermissionIDs = allowedPerms
-	query.IsSuperAdmin = isSuperAdmin
+	query.IsSuperAdmin = admin.Role != nil && admin.Role.Type == "super_admin"
+	
+	// Default pagination
+	if query.PageNumber < 1 { query.PageNumber = 1 }
+	if query.PageSize < 1 { query.PageSize = 10 }
 
 	return u.complaintRepo.GetPaginated(query)
 }
 
-func (u *complaintUseCase) GetComplaintByID(id uuid.UUID, adminID uuid.UUID) (*domain.Complaint, error) {
-	allowedPerms, isSuperAdmin, err := u.resolveAdminPermissions(adminID)
+func (u *complaintUseCase) GetComplaintByID(id string, adminID string) (*domain.Complaint, error) {
+	admin, err := u.adminRepo.GetByID(adminID)
 	if err != nil {
 		return nil, err
 	}
 
-	complaint, err := u.complaintRepo.GetByID(id, allowedPerms, isSuperAdmin)
-	if err == nil && complaint != nil {
-		return complaint, nil
-	}
-
-	rawComplaint, err := u.complaintRepo.GetByID(id, nil, true)
-	if err == nil && rawComplaint != nil && rawComplaint.AssigneeID != nil && *rawComplaint.AssigneeID == adminID {
-		return rawComplaint, nil
-	}
-
-	return complaint, err
+	return u.complaintRepo.GetByID(id, nil, admin.Role != nil && admin.Role.Type == "super_admin")
 }
 
 func (u *complaintUseCase) CreateComplaint(complaint *domain.Complaint) error {
-	// Status defaults to Received
+	complaint.ID = domain.NewUUID()
 	complaint.Status = domain.ComplaintStatusReceived
+	complaint.CreatedDate = time.Now()
+	complaint.UpdatedDate = time.Now()
 	return u.complaintRepo.Create(complaint)
 }
 
-func (u *complaintUseCase) AssignComplaint(id uuid.UUID, assignerID uuid.UUID, assigneeID uuid.UUID) error {
-	// Must verify assigner and assignee are in the same department, but for now we just allow managers to assign
-	// Get complaint first to ensure they have permission to access it
-	complaint, err := u.GetComplaintByID(id, assignerID)
+func (u *complaintUseCase) UpdateComplaintStatus(id string, status string, description string, adminID string, images []string) error {
+	complaint, err := u.complaintRepo.GetByID(id, nil, true)
 	if err != nil {
 		return err
 	}
-	if complaint == nil {
-		return errors.New("complaint not found or you don't have permission")
+
+
+	complaint.Status = status
+	complaint.UpdatedDate = time.Now()
+
+	activity := &domain.ComplaintActivity{
+		ID:                domain.NewUUID(),
+		ModuleComplaintId: id,
+		Description:       description,
+		Status:            status,
+		CreatedBy:         adminID,
+		UpdatedBy:         adminID,
+		CreatedDate:       time.Now(),
+		UpdatedDate:       time.Now(),
 	}
 
-	// Optional: Check if assigner is a Manager (Role Logic). We skip strict role checks here if not required.
+	for i, imgUrl := range images {
+		activity.Images = append(activity.Images, domain.ComplaintActivityImage{
+			ID:          domain.NewUUID(),
+			Url:         imgUrl,
+			Sequence:    i + 1,
+			CreatedBy:   adminID,
+			UpdatedBy:   adminID,
+			CreatedDate: time.Now(),
+			UpdatedDate: time.Now(),
+		})
+	}
 
-	complaint.AssignerID = &assignerID
-	complaint.AssigneeID = &assigneeID
-	complaint.Status = domain.ComplaintStatusInProgress
+	if err := u.complaintRepo.CreateActivity(activity); err != nil {
+		return err
+	}
 
 	return u.complaintRepo.Update(complaint)
 }
 
-func (u *complaintUseCase) RejectComplaint(id uuid.UUID, rejecterID uuid.UUID, reason string) error {
-	complaint, err := u.GetComplaintByID(id, rejecterID)
+func (u *complaintUseCase) ForwardComplaint(id string, departmentID string, adminID string) error {
+	complaint, err := u.complaintRepo.GetByID(id, nil, true)
 	if err != nil {
 		return err
 	}
-	if complaint == nil {
-		return errors.New("complaint not found")
-	}
 
-	complaint.RejectedByID = &rejecterID
-	complaint.Status = domain.ComplaintStatusRejected
+	complaint.DepartmentId = &departmentID
+	complaint.Status = domain.ComplaintStatusInProgress
+	complaint.UpdatedDate = time.Now()
 
-	// Add an activity for rejection
 	activity := &domain.ComplaintActivity{
-		ComplaintID: id,
-		AdminID:     &rejecterID,
-		Description: "Rejected: " + reason,
-		Status:      domain.ComplaintStatusRejected,
+		ID:                domain.NewUUID(),
+		ModuleComplaintId: id,
+		Description:       "ส่งเรื่องต่อไปยังหน่วยงานที่เกี่ยวข้อง",
+		Status:            complaint.Status,
+		CreatedBy:         adminID,
+		UpdatedBy:         adminID,
+		CreatedDate:       time.Now(),
+		UpdatedDate:       time.Now(),
 	}
 
-	// Save complaint first
-	err = u.complaintRepo.Update(complaint)
-	if err != nil {
+	if err := u.complaintRepo.CreateActivity(activity); err != nil {
 		return err
 	}
 
-	return u.complaintRepo.CreateActivity(activity)
+	return u.complaintRepo.Update(complaint)
 }
 
-func (u *complaintUseCase) AddActivity(activity *domain.ComplaintActivity, adminID uuid.UUID) error {
-	complaint, err := u.GetComplaintByID(activity.ComplaintID, adminID)
+func (u *complaintUseCase) AssignComplaint(id string, assigneeID string, adminID string) error {
+	complaint, err := u.complaintRepo.GetByID(id, nil, true)
 	if err != nil {
 		return err
 	}
-	if complaint == nil {
-		return errors.New("complaint not found")
+
+	complaint.AssigneeId = &assigneeID
+	complaint.UpdatedDate = time.Now()
+
+	activity := &domain.ComplaintActivity{
+		ID:                domain.NewUUID(),
+		ModuleComplaintId: id,
+		Description:       "มอบหมายงานให้ผู้รับผิดชอบ",
+		Status:            complaint.Status,
+		CreatedBy:         adminID,
+		UpdatedBy:         adminID,
+		CreatedDate:       time.Now(),
+		UpdatedDate:       time.Now(),
 	}
 
-	activity.AdminID = &adminID
+	if err := u.complaintRepo.CreateActivity(activity); err != nil {
+		return err
+	}
 
-	// If activity specifies a new status (e.g. Completed), update the complaint as well
-	if activity.Status != "" && activity.Status != complaint.Status {
-		complaint.Status = activity.Status
-		if err := u.complaintRepo.Update(complaint); err != nil {
-			return err
+	return u.complaintRepo.Update(complaint)
+}
+
+func (u *complaintUseCase) RejectComplaint(id string, reason string, adminID string) error {
+	return u.UpdateComplaintStatus(id, domain.ComplaintStatusRejected, "ปฏิเสธคำร้อง: "+reason, adminID, nil)
+}
+
+func (u *complaintUseCase) AddActivity(activity *domain.ComplaintActivity, adminID string) error {
+	activity.ID = domain.NewUUID()
+	activity.CreatedBy = adminID
+	activity.UpdatedBy = adminID
+	activity.CreatedDate = time.Now()
+	activity.UpdatedDate = time.Now()
+	
+	for i := range activity.Images {
+		activity.Images[i].ID = domain.NewUUID()
+		activity.Images[i].CreatedBy = adminID
+		activity.Images[i].UpdatedBy = adminID
+		activity.Images[i].CreatedDate = time.Now()
+		activity.Images[i].UpdatedDate = time.Now()
+		if activity.Images[i].Sequence == 0 {
+			activity.Images[i].Sequence = i + 1
 		}
-	} else {
-		// Just take current status
-		activity.Status = complaint.Status
 	}
 
 	return u.complaintRepo.CreateActivity(activity)
 }
 
-func (u *complaintUseCase) DeleteComplaint(id uuid.UUID, adminID uuid.UUID) error {
-	// Usually only Citizens or SuperAdmins delete complaints.
-	// We'll allow it if they can view it and are super admin or something, but standard allows deletion if user owns it.
+func (u *complaintUseCase) DeleteComplaint(id string) error {
 	return u.complaintRepo.Delete(id)
 }
