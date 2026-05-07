@@ -39,18 +39,19 @@ func ConnectDB(cfg *config.Config) {
 	log.Println("Migrating fresh MueangSmart schema (snake_case)...")
 	err = DB.AutoMigrate(
 		&domain.AdminRole{},
-		&domain.Module{},
-		&domain.ModuleType{},
-		&domain.Department{},
-		&domain.DepartmentModule{},
-		&domain.DepartmentModuleModuleType{},
 		&domain.Admin{},
 		&domain.AdminRefreshToken{},
-		&domain.AuditLog{},
+		&domain.Department{},
+		&domain.Module{},
+		&domain.ModuleType{},
+		&domain.DepartmentModule{},
+		&domain.DepartmentModuleModuleType{},
 		&domain.Complaint{},
-		&domain.ComplaintImage{},
-		&domain.ComplaintActivity{},
-		&domain.ComplaintActivityImage{},
+		&domain.Municipality{},
+		&domain.MunicipalityBank{},
+		&domain.MunicipalityWorkSchedule{},
+		&domain.AppUser{},
+		&domain.UserActivityTracking{},
 	)
 	if err != nil {
 		log.Fatalf("Fatal: Failed to auto-migrate: %v", err)

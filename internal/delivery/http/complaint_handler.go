@@ -2,6 +2,7 @@ package http
 
 import (
 	"errors"
+	"strings"
 	"super-app-chonburi-go/internal/domain"
 	"super-app-chonburi-go/pkg/jwtutil"
 	"time"
@@ -44,6 +45,11 @@ func (h *ComplaintHandler) GetComplaints(c fiber.Ctx) error {
 	var query domain.ComplaintQuery
 	if err := c.Bind().Query(&query); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid query parameters"})
+	}
+
+	statusesParam := c.Query("statuses")
+	if statusesParam != "" {
+		query.Status = strings.Split(statusesParam, ",")
 	}
 
 	adminID, _ := getAdminIDFromClaims(c)

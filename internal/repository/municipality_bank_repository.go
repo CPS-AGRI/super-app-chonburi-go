@@ -23,7 +23,7 @@ func (r *municipalityBankRepository) GetAll() ([]domain.MunicipalityBank, error)
 
 func (r *municipalityBankRepository) GetActive() (*domain.MunicipalityBank, error) {
 	var bank domain.MunicipalityBank
-	err := r.db.Where("is_active = true AND status = 'active'").First(&bank).Error
+	err := r.db.Where("bank_status = 'active' AND status = 'active'").First(&bank).Error
 	if err != nil {
 		return nil, err
 	}
