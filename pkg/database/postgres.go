@@ -51,6 +51,7 @@ func ConnectDB(cfg *config.Config) {
 		&domain.MunicipalityBank{},
 		&domain.MunicipalityWorkSchedule{},
 		&domain.AppUser{},
+		&domain.UserInformation{},
 		&domain.UserActivityTracking{},
 	)
 	if err != nil {

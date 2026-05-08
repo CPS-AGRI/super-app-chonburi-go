@@ -20,7 +20,7 @@ func (r *dashboardRepository) GetBackOffice(filter domain.DashboardFilter) (*dom
 	dateNow := time.Now().UTC().Truncate(24 * time.Hour)
 
 	var users []domain.AppUser
-	r.db.Find(&users)
+	r.db.Preload("Information").Find(&users)
 
 	var allModules []domain.Module
 	r.db.Find(&allModules)
@@ -49,10 +49,15 @@ func (r *dashboardRepository) GetBackOffice(filter domain.DashboardFilter) (*dom
 	var ageGender domain.AgeGenderDTO
 
 	for _, u := range users {
-		if u.Prefix != nil && (*u.Prefix == "นาย" || *u.Prefix == "Mr" || *u.Prefix == "Mr." || *u.Prefix == "เด็กชาย") {
+		if u.Information == nil {
+			continue
+		}
+		
+		info := u.Information
+		if info.Prefix == "นาย" || info.Prefix == "Mr" || info.Prefix == "Mr." || info.Prefix == "เด็กชาย" {
 			maleUsers++
-			if u.Birthday != nil {
-				age := calculateAge(*u.Birthday, dateNow)
+			if info.Birthday != nil {
+				age := calculateAge(*info.Birthday, dateNow)
 				switch {
 				case age >= 20 && age <= 30:
 					ageGender.Male.AgeGroup20To30++
@@ -66,10 +71,10 @@ func (r *dashboardRepository) GetBackOffice(filter domain.DashboardFilter) (*dom
 					ageGender.Male.AgeGroup61AndAbove++
 				}
 			}
-		} else if u.Prefix != nil && (*u.Prefix == "นาง" || *u.Prefix == "นางสาว" || *u.Prefix == "Mrs" || *u.Prefix == "Miss" || *u.Prefix == "เด็กหญิง") {
+		} else if info.Prefix == "นาง" || info.Prefix == "นางสาว" || info.Prefix == "Mrs" || info.Prefix == "Miss" || info.Prefix == "เด็กหญิง" {
 			femaleUsers++
-			if u.Birthday != nil {
-				age := calculateAge(*u.Birthday, dateNow)
+			if info.Birthday != nil {
+				age := calculateAge(*info.Birthday, dateNow)
 				switch {
 				case age >= 20 && age <= 30:
 					ageGender.Female.AgeGroup20To30++
@@ -113,7 +118,7 @@ func (r *dashboardRepository) GetBackOffice(filter domain.DashboardFilter) (*dom
 		for _, u := range users {
 			if u.CreatedDate.Truncate(24 * time.Hour).Equal(d) {
 				daily.TotalDailyUserUsageCount++
-				if u.Status == domain.AppUserStatusActive {
+				if u.Information != nil && u.Information.Status == "active" {
 					daily.TotalDailyVerifiedUserUsageCount++
 				}
 			}
@@ -155,7 +160,7 @@ func (r *dashboardRepository) GetBackOffice(filter domain.DashboardFilter) (*dom
 	// Count verified users overall
 	verifiedUsers := 0
 	for _, u := range users {
-		if u.Status == domain.AppUserStatusActive {
+		if u.Information != nil && u.Information.Status == "active" {
 			verifiedUsers++
 		}
 	}
@@ -199,44 +204,56 @@ func (r *dashboardRepository) SeedMockData(municipalityId string) error {
 	dateNow := time.Now().UTC()
 
 	// 1. Generate 100 AppUsers
-	var mockUsers []domain.AppUser
 	prefixes := []string{"นาย", "นาง", "นางสาว"}
 	
 	for i := 0; i < 100; i++ {
 		// Randomize prefix
 		prefix := prefixes[i%3]
-		p := &prefix
 		
 		// Randomize age between 18 and 70
 		age := 18 + (i % 52)
 		birthYear := dateNow.Year() - age
 		birthday := time.Date(birthYear, time.Month((i%12)+1), (i%28)+1, 0, 0, 0, 0, time.UTC)
-		b := &birthday
 
-		status := domain.AppUserStatusActive
+		status := "active"
 		if i%10 == 0 {
-			status = domain.AppUserStatusPending
+			status = "pending"
 		}
 
 		name := "ทดสอบ"
 		lastName := "ระบบ"
 
-		mockUsers = append(mockUsers, domain.AppUser{
+		user := domain.AppUser{
 			ID:             uuid.New(),
-			Prefix:         p,
-			Name:           &name,
-			LastName:       &lastName,
-			Birthday:       b,
-			Status:         status,
 			PhoneNumber:    "08" + uuid.New().String()[:8],
 			PinHash:        "dummy",
 			CreatedBy:      "system",
 			CreatedDate:    dateNow.AddDate(0, 0, -(i % 30)),
 			UpdatedBy:      "system",
 			UpdatedDate:    dateNow,
+		}
+		
+		info := domain.UserInformation{
+			UserId:      user.ID,
+			Prefix:      prefix,
+			Name:        name,
+			LastName:    lastName,
+			Birthday:    &birthday,
+			Status:      status,
+			CreatedBy:   "system",
+			CreatedDate: user.CreatedDate,
+		}
+
+		r.db.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Create(&user).Error; err != nil {
+				return err
+			}
+			if err := tx.Create(&info).Error; err != nil {
+				return err
+			}
+			return nil
 		})
 	}
-	r.db.Create(&mockUsers)
 
 	// 2. Generate Activity Tracking for last 30 days
 	var mockActivities []domain.UserActivityTracking
