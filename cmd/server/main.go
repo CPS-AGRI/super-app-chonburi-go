@@ -48,7 +48,6 @@ func main() {
 		AllowCredentials: true,
 	}))
 
-	// Repositories
 	adminRepo := repository.NewAdminRepository(database.DB)
 	adminRoleRepo := repository.NewAdminRoleRepository(database.DB)
 	deptRepo := repository.NewDepartmentRepository(database.DB)
@@ -57,6 +56,9 @@ func main() {
 	moduleRepo := repository.NewModuleRepository(database.DB)
 	moduleTypeRepo := repository.NewModuleTypeRepository(database.DB)
 	muniRepo := repository.NewMunicipalityRepository(database.DB)
+	muniBankRepo := repository.NewMunicipalityBankRepository(database.DB)
+	muniWorkScheduleRepo := repository.NewMunicipalityWorkScheduleRepository(database.DB)
+	dashboardRepo := repository.NewDashboardRepository(database.DB)
 
 	// UseCases
 	authUC := usecase.NewAuthUseCase(adminRepo, rtRepo)
@@ -67,6 +69,9 @@ func main() {
 	moduleUC := usecase.NewModuleUseCase(moduleRepo, adminRepo)
 	moduleTypeUC := usecase.NewModuleTypeUseCase(moduleTypeRepo)
 	muniUC := usecase.NewMunicipalityUseCase(muniRepo)
+	muniBankUC := usecase.NewMunicipalityBankUseCase(muniBankRepo)
+	muniWorkScheduleUC := usecase.NewMunicipalityWorkScheduleUseCase(muniWorkScheduleRepo)
+	dashboardUC := usecase.NewDashboardUseCase(dashboardRepo)
 
 	// Handlers
 	authHandler := delivery.NewAuthHandler(authUC)
@@ -77,6 +82,9 @@ func main() {
 	moduleHandler := delivery.NewModuleHandler(moduleUC)
 	moduleTypeHandler := delivery.NewModuleTypeHandler(moduleTypeUC)
 	muniHandler := delivery.NewMunicipalityHandler(muniUC)
+	muniBankHandler := delivery.NewMunicipalityBankHandler(muniBankUC)
+	muniWorkScheduleHandler := delivery.NewMunicipalityWorkScheduleHandler(muniWorkScheduleUC)
+	dashboardHandler := delivery.NewDashboardHandler(dashboardUC)
 
 	api := app.Group("/api/v1")
 	
@@ -88,7 +96,10 @@ func main() {
 	complaintHandler.RegisterRoutes(api)
 	moduleHandler.RegisterRoutes(api)
 	moduleTypeHandler.RegisterRoutes(api)
+	muniBankHandler.RegisterRoutes(api)
+	muniWorkScheduleHandler.RegisterRoutes(api)
 	muniHandler.RegisterRoutes(api)
+	dashboardHandler.RegisterRoutes(api)
 
 	port := ":" + cfg.AppPort
 	log.Printf("🚀 Server is starting on http://localhost%s", port)

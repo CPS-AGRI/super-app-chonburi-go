@@ -105,6 +105,13 @@ func (u *authUseCase) Me(id string) (*domain.Admin, []string, error) {
 			if module.Key != nil && *module.Key != "" {
 				uniqueKeys[*module.Key] = true
 			}
+
+			// Explicitly grant ModuleComplaintCenter if this is the Center module
+			if module.ID == "d01b2ce5-34a9-498b-bba0-b1b8360f1ea9" || 
+			   module.NameTh == "ศูนย์ร้องทุกข์" || 
+			   module.NameEn == "Complaint Center" {
+				uniqueKeys["ModuleComplaintCenter"] = true
+			}
 		}
 	}
 

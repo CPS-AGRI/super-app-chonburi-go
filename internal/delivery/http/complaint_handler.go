@@ -2,11 +2,13 @@ package http
 
 import (
 	"errors"
+	"strings"
 	"super-app-chonburi-go/internal/domain"
 	"super-app-chonburi-go/pkg/jwtutil"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
+	"github.com/google/uuid"
 )
 
 type ComplaintHandler struct {
@@ -46,6 +48,17 @@ func (h *ComplaintHandler) GetComplaints(c fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid query parameters"})
 	}
 
+	statusesParam := c.Query("statuses")
+	if statusesParam != "" {
+		query.Status = strings.Split(statusesParam, ",")
+	}
+
+	hasBeenAssignedParam := c.Query("has_been_assigned")
+	if hasBeenAssignedParam != "" {
+		val := hasBeenAssignedParam == "true"
+		query.HasBeenAssigned = &val
+	}
+
 	adminID, _ := getAdminIDFromClaims(c)
 	result, err := h.uc.GetComplaints(query, adminID)
 	if err != nil {
@@ -74,7 +87,7 @@ func (h *ComplaintHandler) Create(c fiber.Ctx) error {
 
 	adminID, _ := getAdminIDFromClaims(c)
 	req.CreatedBy = adminID
-	req.ID = domain.NewUUID()
+	req.ID = uuid.New()
 
 	if err := h.uc.CreateComplaint(&req); err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
@@ -161,8 +174,8 @@ func (h *ComplaintHandler) AddActivity(c fiber.Ctx) error {
 	}
 
 	adminID, _ := getAdminIDFromClaims(c)
-	req.ID = domain.NewUUID()
-	req.ModuleComplaintId = id
+	req.ID = uuid.New()
+	req.ModuleComplaintId = uuid.MustParse(id)
 	req.CreatedBy = adminID
 	req.UpdatedBy = adminID
 	req.CreatedDate = time.Now()
