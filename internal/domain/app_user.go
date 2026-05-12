@@ -51,7 +51,7 @@ type UserInformation struct {
 	Birthday                  *time.Time `gorm:"type:timestamptz;column:birthday" json:"birthday"`
 	
 	// Sensitive Data (Encrypted & Reversible)
-	IdentityNumberEncrypted   string     `gorm:"type:text;column:identity_number_encrypted" json:"-"`
+	IdentityNumberEncrypted   string     `gorm:"type:text;column:identity_number_encrypted" json:"identity_number"`
 	IdentityNumberHash        string     `gorm:"type:text;index;column:identity_number_hash" json:"-"` // Blind Index for searching
 	
 	LaserIdEncrypted          string     `gorm:"type:text;column:laser_id_encrypted" json:"-"`

@@ -21,6 +21,7 @@ type Municipality struct {
 	UpdatedBy      string    `gorm:"type:text;column:updated_by;default:''" json:"updatedBy"`
 	CreatedAt      time.Time `gorm:"type:timestamptz;column:created_date" json:"createdAt"`
 	UpdatedAt      time.Time `gorm:"type:timestamptz;column:updated_date" json:"updatedAt"`
+	ComplaintMode  string    `gorm:"type:text;column:complaint_mode;default:'direct'" json:"complaintMode"`
 }
 
 func (Municipality) TableName() string {
