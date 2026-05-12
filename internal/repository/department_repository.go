@@ -238,5 +238,27 @@ func (r *departmentRepository) assignModuleTypes(tx *gorm.DB, dept *domain.Depar
 }
 
 func (r *departmentRepository) Delete(id string) error {
-	return r.db.Delete(&domain.Department{}, "id = ?", id).Error
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		// 1. Clear admin_departments associations
+		if err := tx.Exec("DELETE FROM admin_departments WHERE department_id = ?", id).Error; err != nil {
+			return err
+		}
+
+		// 2. Clear module types and modules associations
+		var deptModules []domain.DepartmentModule
+		if err := tx.Where("department_id = ?", id).Find(&deptModules).Error; err != nil {
+			return err
+		}
+		for _, dm := range deptModules {
+			if err := tx.Where("department_module_id = ?", dm.ID).Delete(&domain.DepartmentModuleModuleType{}).Error; err != nil {
+				return err
+			}
+		}
+		if err := tx.Where("department_id = ?", id).Delete(&domain.DepartmentModule{}).Error; err != nil {
+			return err
+		}
+
+		// 3. Finally, delete the department itself
+		return tx.Delete(&domain.Department{}, "id = ?", id).Error
+	})
 }
