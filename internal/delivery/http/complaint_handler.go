@@ -23,6 +23,7 @@ func NewComplaintHandler(uc domain.ComplaintUseCase, deptUc domain.DepartmentUse
 func (h *ComplaintHandler) RegisterRoutes(router fiber.Router) {
 	group := router.Group("/complaints", jwtutil.RequireAuth())
 	group.Get("", h.GetComplaints)
+	group.Get("/departments", h.GetDepartmentsAlias)
 	group.Get("/:id", h.GetComplaintByID)
 	group.Post("", h.Create)
 	group.Put("/:id/status", h.UpdateStatus)
@@ -30,7 +31,6 @@ func (h *ComplaintHandler) RegisterRoutes(router fiber.Router) {
 	group.Put("/:id/assign", h.Assign)
 	group.Put("/:id/reject", h.Reject)
 	group.Post("/:id/activities", h.AddActivity)
-	group.Get("/departments", h.GetDepartmentsAlias)
 	group.Delete("/:id", h.Delete)
 }
 
@@ -99,14 +99,15 @@ func (h *ComplaintHandler) Create(c fiber.Ctx) error {
 func (h *ComplaintHandler) Assign(c fiber.Ctx) error {
 	id := c.Params("id")
 	var req struct {
-		AssigneeId string `json:"assignee_id"`
+		AssigneeId  string `json:"assignee_id"`
+		Description string `json:"description"`
 	}
 	if err := c.Bind().JSON(&req); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
 	}
 
 	adminID, _ := getAdminIDFromClaims(c)
-	if err := h.uc.AssignComplaint(id, req.AssigneeId, adminID); err != nil {
+	if err := h.uc.AssignComplaint(id, req.AssigneeId, req.Description, adminID); err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
 
@@ -153,13 +154,14 @@ func (h *ComplaintHandler) Forward(c fiber.Ctx) error {
 	id := c.Params("id")
 	var req struct {
 		DepartmentId string `json:"department_id"`
+		Description  string `json:"description"`
 	}
 	if err := c.Bind().JSON(&req); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
 	}
 
 	adminID, _ := getAdminIDFromClaims(c)
-	if err := h.uc.ForwardComplaint(id, req.DepartmentId, adminID); err != nil {
+	if err := h.uc.ForwardComplaint(id, req.DepartmentId, req.Description, adminID); err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
 

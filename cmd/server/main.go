@@ -65,7 +65,7 @@ func main() {
 	adminUC := usecase.NewAdminUseCase(adminRepo)
 	adminRoleUC := usecase.NewAdminRoleUseCase(adminRoleRepo)
 	deptUC := usecase.NewDepartmentUseCase(deptRepo)
-	complaintUC := usecase.NewComplaintUseCase(complaintRepo, adminRepo)
+	complaintUC := usecase.NewComplaintUseCase(complaintRepo, adminRepo, muniRepo)
 	moduleUC := usecase.NewModuleUseCase(moduleRepo, adminRepo)
 	moduleTypeUC := usecase.NewModuleTypeUseCase(moduleTypeRepo)
 	muniUC := usecase.NewMunicipalityUseCase(muniRepo)

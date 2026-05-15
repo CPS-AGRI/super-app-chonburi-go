@@ -1,6 +1,7 @@
 package usecase
 
 import (
+	"strings"
 	"super-app-chonburi-go/internal/domain"
 	"time"
 	"github.com/google/uuid"
@@ -9,12 +10,14 @@ import (
 type complaintUseCase struct {
 	complaintRepo domain.ComplaintRepository
 	adminRepo     domain.AdminRepository
+	muniRepo      domain.MunicipalityRepository
 }
 
-func NewComplaintUseCase(complaintRepo domain.ComplaintRepository, adminRepo domain.AdminRepository) domain.ComplaintUseCase {
+func NewComplaintUseCase(complaintRepo domain.ComplaintRepository, adminRepo domain.AdminRepository, muniRepo domain.MunicipalityRepository) domain.ComplaintUseCase {
 	return &complaintUseCase{
 		complaintRepo: complaintRepo,
 		adminRepo:     adminRepo,
+		muniRepo:      muniRepo,
 	}
 }
 
@@ -33,26 +36,23 @@ func (u *complaintUseCase) GetComplaints(query domain.ComplaintQuery, adminID st
 
 	for _, dept := range admin.Departments {
 		deptIDs = append(deptIDs, dept.ID)
-		
+
 		// Check if this department has the Complaint Center module
 		for _, mod := range dept.Modules {
-			if mod.ID == "d01b2ce5-34a9-498b-bba0-b1b8360f1ea9" || 
-			   mod.NameTh == "ศูนย์ร้องทุกข์" || 
-			   mod.NameEn == "Complaint Center" {
+			nameTh := strings.ToLower(mod.NameTh)
+			nameEn := strings.ToLower(mod.NameEn)
+			if mod.ID == "d01b2ce5-34a9-498b-bba0-b1b8360f1ea9" ||
+				strings.Contains(nameTh, "ศูนย์ร้องทุกข์") ||
+				strings.Contains(nameTh, "ศูนย์รับเรื่อง") ||
+				strings.Contains(nameEn, "complaint center") {
 				isCenter = true
 			}
 		}
+	}
 
-		// Collect allowed module type IDs for Mode 1 fallback
-		for _, mod := range dept.Modules {
-			for _, mt := range mod.ModuleTypes {
-				allowedModuleTypeIDs = append(allowedModuleTypeIDs, mt.ID)
-			}
-		}
-		// Also check raw IDs if present on the department object
-		if len(dept.ModuleTypeIds) > 0 {
-			allowedModuleTypeIDs = append(allowedModuleTypeIDs, dept.ModuleTypeIds...)
-		}
+	// Fix Filtering Bug: Get strictly assigned ModuleType IDs from bridge table
+	if len(deptIDs) > 0 {
+		allowedModuleTypeIDs, _ = u.complaintRepo.GetAllowedModuleTypeIDs(deptIDs)
 	}
 
 	query.AdminDepartmentIDs = deptIDs
@@ -80,6 +80,7 @@ func (u *complaintUseCase) CreateComplaint(complaint *domain.Complaint) error {
 	complaint.Status = domain.ComplaintStatusPending
 	complaint.CreatedDate = time.Now()
 	complaint.UpdatedDate = time.Now()
+
 	return u.complaintRepo.Create(complaint)
 }
 
@@ -123,7 +124,7 @@ func (u *complaintUseCase) UpdateComplaintStatus(id string, status string, descr
 	return u.complaintRepo.Update(complaint)
 }
 
-func (u *complaintUseCase) ForwardComplaint(id string, departmentID string, adminID string) error {
+func (u *complaintUseCase) ForwardComplaint(id string, departmentID string, description string, adminID string) error {
 	complaint, err := u.complaintRepo.GetByID(id, nil, true)
 	if err != nil {
 		return err
@@ -133,10 +134,15 @@ func (u *complaintUseCase) ForwardComplaint(id string, departmentID string, admi
 	complaint.Status = domain.ComplaintStatusReceived
 	complaint.UpdatedDate = time.Now()
 
+	desc := description
+	if desc == "" {
+		desc = "มอบหมายงานไปยังหน่วยงานที่เกี่ยวข้อง (รับเรื่องแล้ว)"
+	}
+
 	activity := &domain.ComplaintActivity{
 		ID:                uuid.New(),
 		ModuleComplaintId: uuid.MustParse(id),
-		Description:       "มอบหมายงานไปยังหน่วยงานที่เกี่ยวข้อง (รับเรื่องแล้ว)",
+		Description:       desc,
 		Status:            complaint.Status,
 		CreatedBy:         adminID,
 		UpdatedBy:         adminID,
@@ -151,7 +157,7 @@ func (u *complaintUseCase) ForwardComplaint(id string, departmentID string, admi
 	return u.complaintRepo.Update(complaint)
 }
 
-func (u *complaintUseCase) AssignComplaint(id string, assigneeID string, adminID string) error {
+func (u *complaintUseCase) AssignComplaint(id string, assigneeID string, description string, adminID string) error {
 	complaint, err := u.complaintRepo.GetByID(id, nil, true)
 	if err != nil {
 		return err
@@ -161,10 +167,15 @@ func (u *complaintUseCase) AssignComplaint(id string, assigneeID string, adminID
 	complaint.Status = domain.ComplaintStatusInProgress
 	complaint.UpdatedDate = time.Now()
 
+	desc := description
+	if desc == "" {
+		desc = "มอบหมายงานให้ผู้รับผิดชอบ (กำลังดำเนินงาน)"
+	}
+
 	activity := &domain.ComplaintActivity{
 		ID:                uuid.New(),
 		ModuleComplaintId: uuid.MustParse(id),
-		Description:       "มอบหมายงานให้ผู้รับผิดชอบ (กำลังดำเนินงาน)",
+		Description:       desc,
 		Status:            complaint.Status,
 		CreatedBy:         adminID,
 		UpdatedBy:         adminID,
@@ -185,15 +196,30 @@ func (u *complaintUseCase) RejectComplaint(id string, reason string, adminID str
 		return err
 	}
 
-	complaint.DepartmentId = nil // Clear department to return to center
-	complaint.Status = domain.ComplaintStatusRejected
+	// Handle Workflow Modes
+	muni, err := u.muniRepo.GetFirst()
+	status := domain.ComplaintStatusRejected
+	var activityDesc string
+
+	// Always clear department on reject so it disappears from the department's manage table
+	complaint.DepartmentId = nil
+
+	if err == nil && muni.ComplaintMode == "direct" {
+		// Option 1: Direct Mode - mark as rejected for internal review/history
+		activityDesc = "ตีกลับเรื่อง (ถูกปฏิเสธ): " + reason
+	} else {
+		// Option 2: Central Mode - Return to Center
+		activityDesc = "ตีกลับเรื่องไปยังศูนย์ร้องทุกข์: " + reason
+	}
+
+	complaint.Status = status
 	complaint.UpdatedDate = time.Now()
 
 	activity := &domain.ComplaintActivity{
 		ID:                uuid.New(),
 		ModuleComplaintId: uuid.MustParse(id),
-		Description:       "ตีกลับเรื่องไปยังศูนย์ร้องทุกข์: " + reason,
-		Status:            complaint.Status,
+		Description:       activityDesc,
+		Status:            status,
 		CreatedBy:         adminID,
 		UpdatedBy:         adminID,
 		CreatedDate:       time.Now(),
@@ -223,6 +249,16 @@ func (u *complaintUseCase) AddActivity(activity *domain.ComplaintActivity, admin
 		if activity.Images[i].Sequence == 0 {
 			activity.Images[i].Sequence = i + 1
 		}
+	}
+
+	// Fetch main complaint to update its UpdatedDate and Status
+	complaint, err := u.complaintRepo.GetByID(activity.ModuleComplaintId.String(), nil, true)
+	if err == nil && complaint != nil {
+		if activity.Status != "" {
+			complaint.Status = activity.Status
+		}
+		complaint.UpdatedDate = time.Now()
+		_ = u.complaintRepo.Update(complaint)
 	}
 
 	return u.complaintRepo.CreateActivity(activity)

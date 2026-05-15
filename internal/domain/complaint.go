@@ -40,6 +40,7 @@ type Complaint struct {
 	UserInformation *UserInformation `gorm:"-" json:"user_information,omitempty"`
 	Images          []ComplaintImage `gorm:"foreignKey:ModuleComplaintId" json:"images,omitempty"`
 	Activities      []ComplaintActivity `gorm:"foreignKey:ModuleComplaintId" json:"activities,omitempty"`
+	Assignee        *Admin           `gorm:"-" json:"assignee,omitempty"`
 }
 
 func (Complaint) TableName() string { return "module_complaints" }
@@ -70,6 +71,7 @@ type ComplaintActivity struct {
 	UpdatedBy         string    `gorm:"not null;column:updated_by" json:"updated_by"`
 
 	Images []ComplaintActivityImage `gorm:"foreignKey:ModuleComplaintActivityId" json:"images,omitempty"`
+	Admin  *Admin                   `gorm:"-" json:"admin,omitempty"`
 }
 
 func (ComplaintActivity) TableName() string { return "module_complaint_activities" }
@@ -127,6 +129,7 @@ type ComplaintRepository interface {
 	Update(complaint *Complaint) error
 	CreateActivity(activity *ComplaintActivity) error
 	Delete(id string) error
+	GetAllowedModuleTypeIDs(deptIDs []string) ([]string, error)
 }
 
 type ComplaintUseCase interface {
@@ -134,8 +137,8 @@ type ComplaintUseCase interface {
 	GetComplaintByID(id string, adminID string) (*Complaint, error)
 	CreateComplaint(complaint *Complaint) error
 	UpdateComplaintStatus(id string, status string, description string, adminID string, images []string) error
-	ForwardComplaint(id string, departmentID string, adminID string) error
-	AssignComplaint(id string, assigneeID string, adminID string) error
+	ForwardComplaint(id string, departmentID string, description string, adminID string) error
+	AssignComplaint(id string, assigneeID string, description string, adminID string) error
 	RejectComplaint(id string, reason string, adminID string) error
 	AddActivity(activity *ComplaintActivity, adminID string) error
 	DeleteComplaint(id string) error
