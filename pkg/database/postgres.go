@@ -50,12 +50,16 @@ func ConnectDB(cfg *config.Config) {
 		&domain.ComplaintImage{},
 		&domain.ComplaintActivity{},
 		&domain.ComplaintActivityImage{},
+		&domain.ComplaintRatingHistory{},
 		&domain.Municipality{},
 		&domain.MunicipalityBank{},
 		&domain.MunicipalityWorkSchedule{},
 		&domain.AppUser{},
 		&domain.UserInformation{},
 		&domain.UserActivityTracking{},
+		&domain.ModuleOnlineTaxPayment{},
+		&domain.ModuleOnlineTaxPaymentInformation{},
+		&domain.ModuleOnlineTaxPaymentLog{},
 	)
 	if err != nil {
 		log.Fatalf("Fatal: Failed to auto-migrate: %v", err)
