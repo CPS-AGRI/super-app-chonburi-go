@@ -12,7 +12,33 @@ const (
 	ComplaintStatusInProgress = "in_progress"
 	ComplaintStatusCompleted  = "completed"
 	ComplaintStatusRejected   = "rejected"
+
+	ActivityStatusUserRating     = "user_rating"
+	ActivityStatusDisputeRequest = "dispute_request"
+
+	RatingSummaryTypeAssignee   = "assignee"
+	RatingSummaryTypeDepartment = "department"
 )
+
+// complaint_rating_summaries
+type ComplaintRatingSummary struct {
+	ID            string    `gorm:"type:uuid;primaryKey;column:id" json:"id"`
+	SummaryType   string    `gorm:"not null;column:summary_type;index" json:"summary_type"`
+	ReferenceId   string    `gorm:"type:uuid;not null;column:reference_id;index" json:"reference_id"`
+	ReferenceName string    `gorm:"not null;column:reference_name" json:"reference_name"`
+	TotalRatings  int       `gorm:"not null;default:0;column:total_ratings" json:"total_ratings"`
+	TotalScore    int       `gorm:"not null;default:0;column:total_score" json:"total_score"`
+	AverageScore  float64   `gorm:"not null;default:0;column:average_score" json:"average_score"`
+	DisputeCount  int       `gorm:"not null;default:0;column:dispute_count" json:"dispute_count"`
+	LastUpdatedAt time.Time `gorm:"not null;type:timestamptz;column:last_updated_at" json:"last_updated_at"`
+}
+
+func (ComplaintRatingSummary) TableName() string { return "complaint_rating_summaries" }
+
+type ComplaintRating struct {
+	Rating  int    `json:"rating"`
+	Comment string `json:"comment"`
+}
 
 // module_complaints
 type Complaint struct {
@@ -32,6 +58,7 @@ type Complaint struct {
 	UpdatedBy         string         `gorm:"not null;column:updated_by" json:"updated_by"`
 	DepartmentId      *string        `gorm:"type:uuid;index;column:department_id" json:"department_id"`
 	IsOtherModuleType bool           `gorm:"not null;default:false;column:is_other_module_type" json:"is_other_module_type"`
+	IsDisputed        bool           `gorm:"not null;default:false;column:is_disputed;index" json:"is_disputed"`
 
 	// Relations
 	ModuleType      *ModuleType      `gorm:"foreignKey:ModuleTypeId" json:"module_type,omitempty"`
@@ -40,6 +67,7 @@ type Complaint struct {
 	UserInformation *UserInformation `gorm:"-" json:"user_information,omitempty"`
 	Images          []ComplaintImage `gorm:"foreignKey:ModuleComplaintId" json:"images,omitempty"`
 	Activities      []ComplaintActivity `gorm:"foreignKey:ModuleComplaintId" json:"activities,omitempty"`
+	Assignee        *Admin           `gorm:"-" json:"assignee,omitempty"`
 }
 
 func (Complaint) TableName() string { return "module_complaints" }
@@ -70,6 +98,7 @@ type ComplaintActivity struct {
 	UpdatedBy         string    `gorm:"not null;column:updated_by" json:"updated_by"`
 
 	Images []ComplaintActivityImage `gorm:"foreignKey:ModuleComplaintActivityId" json:"images,omitempty"`
+	Admin  *Admin                   `gorm:"-" json:"admin,omitempty"`
 }
 
 func (ComplaintActivity) TableName() string { return "module_complaint_activities" }
@@ -87,6 +116,22 @@ type ComplaintActivityImage struct {
 }
 
 func (ComplaintActivityImage) TableName() string { return "module_complaint_activity_images" }
+
+// module_complaint_rating_histories
+type ComplaintRatingHistory struct {
+	ID                uuid.UUID `gorm:"type:uuid;primaryKey;column:id" json:"id"`
+	ModuleComplaintId uuid.UUID `gorm:"type:uuid;index;not null;column:module_complaint_id" json:"module_complaint_id"`
+	AssigneeId        *string   `gorm:"type:uuid;index;column:assignee_id" json:"assignee_id"`
+	DepartmentId      *string   `gorm:"type:uuid;index;column:department_id" json:"department_id"`
+	RatingScore       *int      `gorm:"column:rating_score;index" json:"rating_score"`
+	IsDisputed        bool      `gorm:"not null;default:false;column:is_disputed;index" json:"is_disputed"`
+	CreatedDate       time.Time `gorm:"not null;type:timestamptz;column:created_date;index" json:"created_at"`
+	UpdatedDate       time.Time `gorm:"not null;type:timestamptz;column:updated_date" json:"updated_at"`
+	CreatedBy         string    `gorm:"not null;column:created_by" json:"created_by"`
+	UpdatedBy         string    `gorm:"not null;column:updated_by" json:"updated_by"`
+}
+
+func (ComplaintRatingHistory) TableName() string { return "module_complaint_rating_histories" }
 
 // Interfaces
 type ComplaintQuery struct {
@@ -108,6 +153,7 @@ type ComplaintQuery struct {
 	IsComplaintCenter    bool
 	AdminDepartmentIDs   []string
 	HasBeenAssigned      *bool
+	AdminRoleType        string
 }
 
 type PaginatedComplaintResponse struct {
@@ -127,6 +173,20 @@ type ComplaintRepository interface {
 	Update(complaint *Complaint) error
 	CreateActivity(activity *ComplaintActivity) error
 	Delete(id string) error
+	GetAllowedModuleTypeIDs(deptIDs []string) ([]string, error)
+	GetRatingSummaries(summaryType string) ([]ComplaintRatingSummary, error)
+	GetOverviewStats() (*ComplaintOverviewStats, error)
+	CreateRatingHistory(history *ComplaintRatingHistory) error
+	GetCompleterInfo(complaintID string) (*string, *string, error)
+}
+
+type ComplaintOverviewStats struct {
+	Total      int64 `json:"total"`
+	Pending    int64 `json:"pending"`
+	Received   int64 `json:"received"`
+	InProgress int64 `json:"in_progress"`
+	Completed  int64 `json:"completed"`
+	Disputed   int64 `json:"disputed"`
 }
 
 type ComplaintUseCase interface {
@@ -134,9 +194,13 @@ type ComplaintUseCase interface {
 	GetComplaintByID(id string, adminID string) (*Complaint, error)
 	CreateComplaint(complaint *Complaint) error
 	UpdateComplaintStatus(id string, status string, description string, adminID string, images []string) error
-	ForwardComplaint(id string, departmentID string, adminID string) error
-	AssignComplaint(id string, assigneeID string, adminID string) error
+	ForwardComplaint(id string, departmentID string, description string, adminID string) error
+	AssignComplaint(id string, assigneeID string, description string, adminID string) error
 	RejectComplaint(id string, reason string, adminID string) error
 	AddActivity(activity *ComplaintActivity, adminID string) error
 	DeleteComplaint(id string) error
+	RateComplaint(id string, userID string, rating int, comment string) error
+	DisputeComplaint(id string, userID string, reason string) error
+	GetRatingSummaries(summaryType string) ([]ComplaintRatingSummary, error)
+	GetOverviewStats() (*ComplaintOverviewStats, error)
 }
