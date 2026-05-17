@@ -59,6 +59,7 @@ func main() {
 	muniBankRepo := repository.NewMunicipalityBankRepository(database.DB)
 	muniWorkScheduleRepo := repository.NewMunicipalityWorkScheduleRepository(database.DB)
 	dashboardRepo := repository.NewDashboardRepository(database.DB)
+	taxRepo := repository.NewTaxRepository(database.DB)
 
 	// UseCases
 	authUC := usecase.NewAuthUseCase(adminRepo, rtRepo)
@@ -72,6 +73,7 @@ func main() {
 	muniBankUC := usecase.NewMunicipalityBankUseCase(muniBankRepo)
 	muniWorkScheduleUC := usecase.NewMunicipalityWorkScheduleUseCase(muniWorkScheduleRepo)
 	dashboardUC := usecase.NewDashboardUseCase(dashboardRepo)
+	taxUC := usecase.NewTaxUseCase(taxRepo)
 
 	// Handlers
 	authHandler := delivery.NewAuthHandler(authUC)
@@ -85,6 +87,7 @@ func main() {
 	muniBankHandler := delivery.NewMunicipalityBankHandler(muniBankUC)
 	muniWorkScheduleHandler := delivery.NewMunicipalityWorkScheduleHandler(muniWorkScheduleUC)
 	dashboardHandler := delivery.NewDashboardHandler(dashboardUC)
+	taxHandler := delivery.NewTaxHandler(taxUC)
 
 	api := app.Group("/api/v1")
 	
@@ -100,6 +103,7 @@ func main() {
 	muniWorkScheduleHandler.RegisterRoutes(api)
 	muniHandler.RegisterRoutes(api)
 	dashboardHandler.RegisterRoutes(api)
+	taxHandler.RegisterRoutes(api)
 
 	port := ":" + cfg.AppPort
 	log.Printf("🚀 Server is starting on http://localhost%s", port)

@@ -1,9 +1,12 @@
 package usecase
 
 import (
+	"encoding/json"
+	"fmt"
 	"strings"
 	"super-app-chonburi-go/internal/domain"
 	"time"
+
 	"github.com/google/uuid"
 )
 
@@ -28,6 +31,9 @@ func (u *complaintUseCase) GetComplaints(query domain.ComplaintQuery, adminID st
 	}
 
 	query.IsSuperAdmin = admin.Role != nil && admin.Role.Type == "super_admin"
+	if admin.Role != nil {
+		query.AdminRoleType = admin.Role.Type
+	}
 
 	// Populate Admin Department IDs
 	var deptIDs []string
@@ -266,4 +272,125 @@ func (u *complaintUseCase) AddActivity(activity *domain.ComplaintActivity, admin
 
 func (u *complaintUseCase) DeleteComplaint(id string) error {
 	return u.complaintRepo.Delete(id)
+}
+
+func (u *complaintUseCase) RateComplaint(id string, userID string, rating int, comment string) error {
+	complaint, err := u.complaintRepo.GetByID(id, nil, true)
+	if err != nil {
+		return err
+	}
+
+	if complaint.Status != domain.ComplaintStatusCompleted {
+		return fmt.Errorf("can only rate a completed complaint")
+	}
+
+	// 1. Get completer info for assignee_id and department_id
+	assigneeID, departmentID, _ := u.complaintRepo.GetCompleterInfo(id)
+
+	// 2. Create history record
+	history := &domain.ComplaintRatingHistory{
+		ID:                uuid.New(),
+		ModuleComplaintId: uuid.MustParse(id),
+		AssigneeId:        assigneeID,
+		DepartmentId:      departmentID,
+		RatingScore:       &rating,
+		IsDisputed:        false,
+		CreatedDate:       time.Now(),
+		UpdatedDate:       time.Now(),
+		CreatedBy:         userID,
+		UpdatedBy:         userID,
+	}
+	if err := u.complaintRepo.CreateRatingHistory(history); err != nil {
+		return err
+	}
+
+	// 3. Reset active dispute flag on the main complaint
+	complaint.IsDisputed = false 
+	if err := u.complaintRepo.Update(complaint); err != nil {
+		return err
+	}
+
+	descBytes, _ := json.Marshal(domain.ComplaintRating{Rating: rating, Comment: comment})
+
+	activity := &domain.ComplaintActivity{
+		ID:                uuid.New(),
+		ModuleComplaintId: uuid.MustParse(id),
+		Description:       string(descBytes),
+		Status:            domain.ActivityStatusUserRating,
+		CreatedBy:         userID,
+		UpdatedBy:         userID,
+		CreatedDate:       time.Now(),
+		UpdatedDate:       time.Now(),
+	}
+
+	return u.complaintRepo.CreateActivity(activity)
+}
+
+func (u *complaintUseCase) DisputeComplaint(id string, userID string, reason string) error {
+	complaint, err := u.complaintRepo.GetByID(id, nil, true)
+	if err != nil {
+		return err
+	}
+
+	if complaint.Status != domain.ComplaintStatusCompleted {
+		return fmt.Errorf("can only dispute a completed complaint")
+	}
+
+	// 1. Get completer info for assignee_id and department_id (the person who failed to complete the job)
+	assigneeID, departmentID, _ := u.complaintRepo.GetCompleterInfo(id)
+
+	// 2. Create history record
+	history := &domain.ComplaintRatingHistory{
+		ID:                uuid.New(),
+		ModuleComplaintId: uuid.MustParse(id),
+		AssigneeId:        assigneeID,
+		DepartmentId:      departmentID,
+		RatingScore:       nil,
+		IsDisputed:        true,
+		CreatedDate:       time.Now(),
+		UpdatedDate:       time.Now(),
+		CreatedBy:         userID,
+		UpdatedBy:         userID,
+	}
+	if err := u.complaintRepo.CreateRatingHistory(history); err != nil {
+		return err
+	}
+
+	muni, muniErr := u.muniRepo.GetFirst()
+
+	activityDesc := "ลูกค้าไม่พอใจผลการดำเนินงาน (direct): " + reason
+	if muniErr == nil && muni.ComplaintMode == "central" {
+		activityDesc = "ลูกค้าไม่พอใจผลการดำเนินงาน (central): " + reason
+		complaint.DepartmentId = nil
+	}
+
+	complaint.AssigneeId = nil
+	complaint.Status = domain.ComplaintStatusPending
+	complaint.UpdatedDate = time.Now()
+	complaint.IsDisputed = true // Mark as disputed in db to flag current active dispute state
+
+	activity := &domain.ComplaintActivity{
+		ID:                uuid.New(),
+		ModuleComplaintId: uuid.MustParse(id),
+		Description:       activityDesc,
+		Status:            domain.ActivityStatusDisputeRequest,
+		CreatedBy:         userID,
+		UpdatedBy:         userID,
+		CreatedDate:       time.Now(),
+		UpdatedDate:       time.Now(),
+	}
+
+	if err := u.complaintRepo.CreateActivity(activity); err != nil {
+		return err
+	}
+
+	return u.complaintRepo.Update(complaint)
+}
+
+func (u *complaintUseCase) GetRatingSummaries(summaryType string) ([]domain.ComplaintRatingSummary, error) {
+	return u.complaintRepo.GetRatingSummaries(summaryType)
+}
+
+func (u *complaintUseCase) GetOverviewStats() (*domain.ComplaintOverviewStats, error) {
+	return u.complaintRepo.GetOverviewStats()
 }
