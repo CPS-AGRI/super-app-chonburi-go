@@ -60,6 +60,15 @@ func ConnectDB(cfg *config.Config) {
 		&domain.ModuleOnlineTaxPayment{},
 		&domain.ModuleOnlineTaxPaymentInformation{},
 		&domain.ModuleOnlineTaxPaymentLog{},
+		&domain.PublicRelation{},
+		&domain.PublicRelationVisitorCount{},
+		&domain.PublicRelationNotification{},
+		&domain.PublicRelationLike{},
+		&domain.PublicRelationImage{},
+		&domain.PublicRelationComment{},
+		&domain.MunicipalityWelcomeScreen{},
+		&domain.ModuleNotification{},
+		&domain.ModuleUserNotification{},
 	)
 	if err != nil {
 		log.Fatalf("Fatal: Failed to auto-migrate: %v", err)
