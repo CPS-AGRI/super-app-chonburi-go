@@ -31,9 +31,10 @@ func main() {
 
 	app := fiber.New(fiber.Config{
 		AppName:      "Super App Chonburi Backend (MueangSmart)",
-		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 10 * time.Second,
-		IdleTimeout:  30 * time.Second,
+		BodyLimit:    100 * 1024 * 1024, // 100MB
+		ReadTimeout:  60 * time.Second,
+		WriteTimeout: 60 * time.Second,
+		IdleTimeout:  120 * time.Second,
 	})
 
 	app.Use(recover.New())
@@ -66,6 +67,7 @@ func main() {
 	muniWorkScheduleRepo := repository.NewMunicipalityWorkScheduleRepository(database.DB)
 	dashboardRepo := repository.NewDashboardRepository(database.DB)
 	taxRepo := repository.NewTaxRepository(database.DB)
+	publicRelationRepo := repository.NewPublicRelationRepository(database.DB)
 
 	// UseCases
 	authUC := usecase.NewAuthUseCase(adminRepo, rtRepo)
@@ -80,6 +82,7 @@ func main() {
 	muniWorkScheduleUC := usecase.NewMunicipalityWorkScheduleUseCase(muniWorkScheduleRepo)
 	dashboardUC := usecase.NewDashboardUseCase(dashboardRepo)
 	taxUC := usecase.NewTaxUseCase(taxRepo)
+	publicRelationUC := usecase.NewPublicRelationUseCase(publicRelationRepo, adminRepo)
 
 	// Handlers
 	authHandler := delivery.NewAuthHandler(authUC)
@@ -95,6 +98,7 @@ func main() {
 	muniWorkScheduleHandler := delivery.NewMunicipalityWorkScheduleHandler(muniWorkScheduleUC)
 	dashboardHandler := delivery.NewDashboardHandler(dashboardUC)
 	taxHandler := delivery.NewTaxHandler(taxUC)
+	publicRelationHandler := delivery.NewPublicRelationHandler(publicRelationUC)
 
 	api := app.Group("/api/v1")
 	
@@ -112,6 +116,8 @@ func main() {
 	muniHandler.RegisterRoutes(api)
 	dashboardHandler.RegisterRoutes(api)
 	taxHandler.RegisterRoutes(api)
+	publicRelationHandler.RegisterRoutes(api)
+	publicRelationHandler.RegisterGlobalRoutes(api)
 
 	port := ":" + cfg.AppPort
 	log.Printf("🚀 Server is starting on http://localhost%s", port)
