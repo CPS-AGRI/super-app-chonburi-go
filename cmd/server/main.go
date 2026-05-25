@@ -35,11 +35,6 @@ func main() {
 		ReadTimeout:  60 * time.Second,
 		WriteTimeout: 60 * time.Second,
 		IdleTimeout:  120 * time.Second,
-		AppName:      "Super App Chonburi Backend (MueangSmart)",
-		BodyLimit:    100 * 1024 * 1024, // 100MB
-		ReadTimeout:  60 * time.Second,
-		WriteTimeout: 60 * time.Second,
-		IdleTimeout:  120 * time.Second,
 	})
 
 	app.Use(recover.New())
@@ -51,11 +46,9 @@ func main() {
 
 	app.Get("/", func(c fiber.Ctx) error {
 		return c.SendString("Super App Chonburi API (MueangSmart Core) is running...")
-		return c.SendString("Super App Chonburi API (MueangSmart Core) is running...")
 	})
 
 	app.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"http://localhost:3000", "http://localhost:3001", "http://localhost:5173"},
 		AllowOrigins:     []string{"http://localhost:3000", "http://localhost:3001", "http://localhost:5173"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization"},
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
@@ -63,12 +56,6 @@ func main() {
 	}))
 
 	adminRepo := repository.NewAdminRepository(database.DB)
-	adminRoleRepo := repository.NewAdminRoleRepository(database.DB)
-	deptRepo := repository.NewDepartmentRepository(database.DB)
-	rtRepo := repository.NewRefreshTokenRepository(database.DB)
-	complaintRepo := repository.NewComplaintRepository(database.DB)
-	moduleRepo := repository.NewModuleRepository(database.DB)
-	moduleTypeRepo := repository.NewModuleTypeRepository(database.DB)
 	adminRoleRepo := repository.NewAdminRoleRepository(database.DB)
 	deptRepo := repository.NewDepartmentRepository(database.DB)
 	rtRepo := repository.NewRefreshTokenRepository(database.DB)
@@ -90,33 +77,13 @@ func main() {
 	complaintUC := usecase.NewComplaintUseCase(complaintRepo, adminRepo, muniRepo)
 	moduleUC := usecase.NewModuleUseCase(moduleRepo, adminRepo)
 	moduleTypeUC := usecase.NewModuleTypeUseCase(moduleTypeRepo)
-	muniBankRepo := repository.NewMunicipalityBankRepository(database.DB)
-	muniWorkScheduleRepo := repository.NewMunicipalityWorkScheduleRepository(database.DB)
-	dashboardRepo := repository.NewDashboardRepository(database.DB)
-	taxRepo := repository.NewTaxRepository(database.DB)
-	publicRelationRepo := repository.NewPublicRelationRepository(database.DB)
-
-	// UseCases
-	authUC := usecase.NewAuthUseCase(adminRepo, rtRepo)
-	adminUC := usecase.NewAdminUseCase(adminRepo)
-	adminRoleUC := usecase.NewAdminRoleUseCase(adminRoleRepo)
-	deptUC := usecase.NewDepartmentUseCase(deptRepo)
-	complaintUC := usecase.NewComplaintUseCase(complaintRepo, adminRepo, muniRepo)
-	moduleUC := usecase.NewModuleUseCase(moduleRepo, adminRepo)
-	moduleTypeUC := usecase.NewModuleTypeUseCase(moduleTypeRepo)
 	muniUC := usecase.NewMunicipalityUseCase(muniRepo)
 	muniBankUC := usecase.NewMunicipalityBankUseCase(muniBankRepo)
 	muniWorkScheduleUC := usecase.NewMunicipalityWorkScheduleUseCase(muniWorkScheduleRepo)
 	dashboardUC := usecase.NewDashboardUseCase(dashboardRepo)
 	taxUC := usecase.NewTaxUseCase(taxRepo)
 	publicRelationUC := usecase.NewPublicRelationUseCase(publicRelationRepo, adminRepo)
-	muniBankUC := usecase.NewMunicipalityBankUseCase(muniBankRepo)
-	muniWorkScheduleUC := usecase.NewMunicipalityWorkScheduleUseCase(muniWorkScheduleRepo)
-	dashboardUC := usecase.NewDashboardUseCase(dashboardRepo)
-	taxUC := usecase.NewTaxUseCase(taxRepo)
-	publicRelationUC := usecase.NewPublicRelationUseCase(publicRelationRepo, adminRepo)
 
-	// Handlers
 	// Handlers
 	authHandler := delivery.NewAuthHandler(authUC)
 	uploadHandler := delivery.NewUploadHandler(minioClient, cfg.MinIO)
