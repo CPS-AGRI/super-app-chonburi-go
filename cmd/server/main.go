@@ -9,7 +9,9 @@ import (
 	"super-app-chonburi-go/internal/repository"
 	"super-app-chonburi-go/internal/usecase"
 	"super-app-chonburi-go/pkg/database"
-	storage "super-app-chonburi-go/pkg/storage/minio"
+	"super-app-chonburi-go/pkg/mail"
+	"super-app-chonburi-go/pkg/storage"
+	minioStorage "super-app-chonburi-go/pkg/storage/minio"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/middleware/compress"
@@ -17,6 +19,7 @@ import (
 	"github.com/gofiber/fiber/v3/middleware/helmet"
 	"github.com/gofiber/fiber/v3/middleware/logger"
 	"github.com/gofiber/fiber/v3/middleware/recover"
+	"github.com/gofiber/fiber/v3/middleware/static"
 )
 
 func main() {
@@ -24,7 +27,7 @@ func main() {
 
 	database.ConnectDB(cfg)
 
-	minioClient, err := storage.NewClient(cfg.MinIO)
+	minioClient, err := minioStorage.NewClient(cfg.MinIO)
 	if err != nil {
 		log.Fatalf("Fatal: Failed to initialize MinIO client: %v", err)
 	}
@@ -48,6 +51,7 @@ func main() {
 		return c.SendString("Super App Chonburi API (MueangSmart Core) is running...")
 	})
 
+	app.Get("/uploads/*", static.New("./uploads"))
 	app.Use(cors.New(cors.Config{
 		AllowOrigins:     []string{"http://localhost:3000", "http://localhost:3001", "http://localhost:5173"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization"},
@@ -67,7 +71,13 @@ func main() {
 	muniWorkScheduleRepo := repository.NewMunicipalityWorkScheduleRepository(database.DB)
 	dashboardRepo := repository.NewDashboardRepository(database.DB)
 	taxRepo := repository.NewTaxRepository(database.DB)
+	taxNewRepo := repository.NewTaxNewRepository(database.DB)
 	publicRelationRepo := repository.NewPublicRelationRepository(database.DB)
+	verificationRepo := repository.NewVerificationRepository(database.DB)
+
+	// Providers
+	emailSender := mail.NewSMTPEmailSender(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPEmail, cfg.SMTPPassword)
+	storageProvider := storage.NewLocalStorage("./uploads", "http://localhost:"+cfg.AppPort+"/uploads")
 
 	// UseCases
 	authUC := usecase.NewAuthUseCase(adminRepo, rtRepo)
@@ -82,7 +92,9 @@ func main() {
 	muniWorkScheduleUC := usecase.NewMunicipalityWorkScheduleUseCase(muniWorkScheduleRepo)
 	dashboardUC := usecase.NewDashboardUseCase(dashboardRepo)
 	taxUC := usecase.NewTaxUseCase(taxRepo)
+	taxNewUC := usecase.NewTaxNewUseCase(taxNewRepo, emailSender, "")
 	publicRelationUC := usecase.NewPublicRelationUseCase(publicRelationRepo, adminRepo)
+	verificationUC := usecase.NewVerificationUseCase(verificationRepo)
 
 	// Handlers
 	authHandler := delivery.NewAuthHandler(authUC)
@@ -98,7 +110,9 @@ func main() {
 	muniWorkScheduleHandler := delivery.NewMunicipalityWorkScheduleHandler(muniWorkScheduleUC)
 	dashboardHandler := delivery.NewDashboardHandler(dashboardUC)
 	taxHandler := delivery.NewTaxHandler(taxUC)
+	taxNewHandler := delivery.NewTaxNewHandler(taxNewUC, storageProvider)
 	publicRelationHandler := delivery.NewPublicRelationHandler(publicRelationUC)
+	verificationHandler := delivery.NewVerificationHandler(verificationUC)
 
 	api := app.Group("/api/v1")
 	
@@ -116,8 +130,10 @@ func main() {
 	muniHandler.RegisterRoutes(api)
 	dashboardHandler.RegisterRoutes(api)
 	taxHandler.RegisterRoutes(api)
+	taxNewHandler.RegisterRoutes(api)
 	publicRelationHandler.RegisterRoutes(api)
 	publicRelationHandler.RegisterGlobalRoutes(api)
+	verificationHandler.RegisterRoutes(api)
 
 	port := ":" + cfg.AppPort
 	log.Printf("🚀 Server is starting on http://localhost%s", port)

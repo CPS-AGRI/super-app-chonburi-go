@@ -231,9 +231,9 @@ func (r *publicRelationRepository) GetPaginatedNotifications(moduleId string, qu
 	db := r.db.Model(&domain.PublicRelationNotification{}).Where("module_id = ?", moduleId)
 
 	if history {
-		db = db.Where("process_status = ?", "success")
+		db = db.Where("status = ? AND (process_status = ? OR (send_date IS NOT NULL AND send_date <= ?))", "active", "success", time.Now())
 	} else {
-		db = db.Where("process_status != ?", "success")
+		db = db.Where("status != ? OR (status = ? AND process_status != ? AND (send_date IS NULL OR send_date > ?))", "active", "active", "success", time.Now())
 	}
 
 	if query.Title != nil && *query.Title != "" {

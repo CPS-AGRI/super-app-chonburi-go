@@ -69,6 +69,13 @@ func ConnectDB(cfg *config.Config) {
 		&domain.MunicipalityWelcomeScreen{},
 		&domain.ModuleNotification{},
 		&domain.ModuleUserNotification{},
+		&domain.UserFCMToken{},
+		&domain.TaxRate{},
+		&domain.TaxBusiness{},
+		&domain.TaxDeclaration{},
+		&domain.BankReconciliationBatch{},
+		&domain.BankReconciliationRecord{},
+		&domain.ElaasDailySummary{},
 	)
 	if err != nil {
 		log.Fatalf("Fatal: Failed to auto-migrate: %v", err)

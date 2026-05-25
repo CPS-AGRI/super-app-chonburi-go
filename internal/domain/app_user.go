@@ -65,6 +65,7 @@ type UserInformation struct {
 	Status                    string     `gorm:"type:text;not null;default:'active';column:status" json:"status"`
 	VerificationStatus        string     `gorm:"type:text;not null;default:'unverified';column:verification_status" json:"verification_status"`
 	VerifiedDate              *time.Time `gorm:"type:timestamptz;column:verified_date" json:"verified_date"`
+	RejectionReason           *string    `gorm:"type:text;column:rejection_reason" json:"rejection_reason"`
 	
 	// Address Data
 	HouseNumber               string     `gorm:"type:text;not null;default:'';column:house_number" json:"house_number"`
@@ -95,3 +96,14 @@ type UserInformation struct {
 func (UserInformation) TableName() string {
 	return "user_informations"
 }
+
+type UserFCMToken struct {
+	UserID      uuid.UUID `gorm:"type:uuid;primaryKey;column:user_id"`
+	DeviceID    string    `gorm:"type:text;primaryKey;column:device_id"`
+	Token       string    `gorm:"type:text;not null;column:token"`
+	CreatedDate time.Time `gorm:"type:timestamptz;not null;default:CURRENT_TIMESTAMP;column:created_date"`
+	UpdatedDate time.Time `gorm:"type:timestamptz;not null;default:CURRENT_TIMESTAMP;column:updated_date"`
+}
+
+func (UserFCMToken) TableName() string { return "user_fcm_tokens" }
+

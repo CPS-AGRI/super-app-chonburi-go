@@ -9,11 +9,15 @@ import (
 )
 
 type Config struct {
-	AppPort    string
-	DBDsn      string
-	OrgName    string
-	OrgLogoURL string
-	MinIO      MinIOConfig
+	AppPort      string
+	DBDsn        string
+	OrgName      string
+	OrgLogoURL   string
+	SMTPHost     string
+	SMTPPort     string
+	SMTPEmail    string
+	SMTPPassword string
+	MinIO        MinIOConfig
 }
 
 type MinIOConfig struct {
@@ -85,11 +89,23 @@ func LoadConfig() *Config {
 	minioPresignURLTTL := getEnvInt("MINIO_PRESIGN_URL_TTL_SECONDS", 3600)
 	minioMaxUploadSizeMB := int64(getEnvInt("MINIO_MAX_UPLOAD_SIZE_MB", 10))
 
+	smtpHost := os.Getenv("SMTP_HOST")
+	smtpPort := os.Getenv("SMTP_PORT")
+	if smtpPort == "" {
+		smtpPort = "587"
+	}
+	smtpEmail := os.Getenv("SMTP_EMAIL")
+	smtpPassword := os.Getenv("SMTP_PASSWORD")
+
 	return &Config{
-		AppPort:    port,
-		DBDsn:      dsn,
-		OrgName:    orgName,
-		OrgLogoURL: orgLogoURL,
+		AppPort:      port,
+		DBDsn:        dsn,
+		OrgName:      orgName,
+		OrgLogoURL:   orgLogoURL,
+		SMTPHost:     smtpHost,
+		SMTPPort:     smtpPort,
+		SMTPEmail:    smtpEmail,
+		SMTPPassword: smtpPassword,
 		MinIO: MinIOConfig{
 			Endpoint:        minioEndpoint,
 			AccessKey:       minioAccessKey,
