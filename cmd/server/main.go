@@ -9,6 +9,7 @@ import (
 	"super-app-chonburi-go/internal/repository"
 	"super-app-chonburi-go/internal/usecase"
 	"super-app-chonburi-go/pkg/database"
+	storage "super-app-chonburi-go/pkg/storage/minio"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/middleware/compress"
@@ -23,6 +24,11 @@ func main() {
 
 	database.ConnectDB(cfg)
 	database.Seed()
+
+	minioClient, err := storage.NewClient(cfg.MinIO)
+	if err != nil {
+		log.Fatalf("Fatal: Failed to initialize MinIO client: %v", err)
+	}
 
 	app := fiber.New(fiber.Config{
 		AppName:      "Super App Chonburi Backend v3",
@@ -41,7 +47,7 @@ func main() {
 	app.Get("/", func(c fiber.Ctx) error {
 		return c.SendString("Super App Chonburi API is running...")
 	})
-	
+
 	app.Use(cors.New(cors.Config{
 		AllowOrigins:     []string{"http://localhost:3000"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization"},
@@ -57,13 +63,15 @@ func main() {
 
 	authHandler := delivery.NewAuthHandler(authUC)
 	muniHandler := delivery.NewMunicipalityHandler(muniUC)
+	uploadHandler := delivery.NewUploadHandler(minioClient, cfg.MinIO)
 
 	authHandler.RegisterRoutes(app)
 	muniHandler.RegisterRoutes(app)
+	uploadHandler.RegisterRoutes(app)
 
 	port := ":" + cfg.AppPort
 	log.Printf("🚀 Server is starting on http://localhost%s", port)
-	
+
 	if err := app.Listen(port); err != nil {
 		log.Fatalf("Fatal: Could not start server: %v", err)
 	}
