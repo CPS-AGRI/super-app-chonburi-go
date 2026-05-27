@@ -326,7 +326,7 @@ func (u *complaintUseCase) RateComplaint(id string, userID string, rating int, c
 	return u.complaintRepo.CreateActivity(activity)
 }
 
-func (u *complaintUseCase) DisputeComplaint(id string, userID string, reason string) error {
+func (u *complaintUseCase) DisputeComplaint(id string, userID string, reason string, images []string) error {
 	complaint, err := u.complaintRepo.GetByID(id, nil, true)
 	if err != nil {
 		return err
@@ -378,6 +378,19 @@ func (u *complaintUseCase) DisputeComplaint(id string, userID string, reason str
 		UpdatedBy:         userID,
 		CreatedDate:       time.Now(),
 		UpdatedDate:       time.Now(),
+	}
+
+	for i, imgUrl := range images {
+		activity.Images = append(activity.Images, domain.ComplaintActivityImage{
+			ID:                        uuid.New(),
+			ModuleComplaintActivityId: activity.ID,
+			Url:                       imgUrl,
+			Sequence:                  i + 1,
+			CreatedBy:                 userID,
+			UpdatedBy:                 userID,
+			CreatedDate:               time.Now(),
+			UpdatedDate:               time.Now(),
+		})
 	}
 
 	if err := u.complaintRepo.CreateActivity(activity); err != nil {

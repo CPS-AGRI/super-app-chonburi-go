@@ -1,23 +1,76 @@
 package usecase
 
 import (
+	"bytes"
+	"encoding/base64"
 	"errors"
+	"fmt"
+	"strings"
 	"super-app-chonburi-go/internal/domain"
+	"super-app-chonburi-go/pkg/storage"
 	"time"
 
 	"github.com/google/uuid"
 )
 
 type publicRelationUseCase struct {
-	repo      domain.PublicRelationRepository
-	adminRepo domain.AdminRepository
+	repo            domain.PublicRelationRepository
+	adminRepo       domain.AdminRepository
+	storageProvider storage.StorageProvider
 }
 
-func NewPublicRelationUseCase(repo domain.PublicRelationRepository, adminRepo domain.AdminRepository) domain.PublicRelationUseCase {
+func NewPublicRelationUseCase(
+	repo domain.PublicRelationRepository,
+	adminRepo domain.AdminRepository,
+	storageProvider storage.StorageProvider,
+) domain.PublicRelationUseCase {
 	return &publicRelationUseCase{
-		repo:      repo,
-		adminRepo: adminRepo,
+		repo:            repo,
+		adminRepo:       adminRepo,
+		storageProvider: storageProvider,
 	}
+}
+
+func (u *publicRelationUseCase) uploadBase64Image(base64Str string) (string, error) {
+	if !strings.HasPrefix(base64Str, "data:") {
+		return base64Str, nil
+	}
+
+	parts := strings.SplitN(base64Str, ";base64,", 2)
+	if len(parts) != 2 {
+		return base64Str, nil
+	}
+
+	metaPart := parts[0] // e.g. "data:image/png"
+	dataPart := parts[1]
+
+	var extension string
+	if strings.Contains(metaPart, "image/png") {
+		extension = ".png"
+	} else if strings.Contains(metaPart, "image/jpeg") || strings.Contains(metaPart, "image/jpg") {
+		extension = ".jpg"
+	} else if strings.Contains(metaPart, "image/webp") {
+		extension = ".webp"
+	} else if strings.Contains(metaPart, "image/gif") {
+		extension = ".gif"
+	} else {
+		extension = ".jpg" // fallback
+	}
+
+	data, err := base64.StdEncoding.DecodeString(dataPart)
+	if err != nil {
+		return "", err
+	}
+
+	filename := fmt.Sprintf("%s%s", uuid.New().String(), extension)
+	reader := bytes.NewReader(data)
+
+	url, err := u.storageProvider.Upload(reader, filename)
+	if err != nil {
+		return "", err
+	}
+
+	return url, nil
 }
 
 // Dashboard
@@ -67,8 +120,14 @@ func (u *publicRelationUseCase) Create(pr *domain.PublicRelation, adminID string
 	pr.CreatedBy = admin.Name + " " + admin.LastName
 	pr.UpdatedBy = admin.Name + " " + admin.LastName
 
-	// Sequence images
+	// Sequence images & auto-upload base64 to MinIO
 	for i := range pr.Images {
+		if strings.HasPrefix(pr.Images[i].Url, "data:") {
+			minioUrl, err := u.uploadBase64Image(pr.Images[i].Url)
+			if err == nil {
+				pr.Images[i].Url = minioUrl
+			}
+		}
 		pr.Images[i].ID = uuid.New()
 		pr.Images[i].ModulePublicRelationId = pr.ID
 		pr.Images[i].Sequence = i + 1
@@ -106,9 +165,15 @@ func (u *publicRelationUseCase) Update(pr *domain.PublicRelation, adminID string
 	existing.UpdatedDate = time.Now()
 	existing.UpdatedBy = admin.Name + " " + admin.LastName
 
-	// Sequence new images
+	// Sequence new images & auto-upload base64 to MinIO
 	existing.Images = pr.Images
 	for i := range existing.Images {
+		if strings.HasPrefix(existing.Images[i].Url, "data:") {
+			minioUrl, err := u.uploadBase64Image(existing.Images[i].Url)
+			if err == nil {
+				existing.Images[i].Url = minioUrl
+			}
+		}
 		existing.Images[i].ID = uuid.New()
 		existing.Images[i].ModulePublicRelationId = existing.ID
 		existing.Images[i].Sequence = i + 1
@@ -203,6 +268,14 @@ func (u *publicRelationUseCase) UploadWelcomeScreen(screen *domain.MunicipalityW
 	admin, err := u.adminRepo.GetByID(adminID)
 	if err != nil {
 		return err
+	}
+
+	// Auto-upload base64 to MinIO if present
+	if strings.HasPrefix(screen.ImageUrl, "data:") {
+		minioUrl, err := u.uploadBase64Image(screen.ImageUrl)
+		if err == nil {
+			screen.ImageUrl = minioUrl
+		}
 	}
 
 	// Deactivate other welcome screens if this one is set to active

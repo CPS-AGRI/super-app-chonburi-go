@@ -200,7 +200,7 @@ type ComplaintUseCase interface {
 	AddActivity(activity *ComplaintActivity, adminID string) error
 	DeleteComplaint(id string) error
 	RateComplaint(id string, userID string, rating int, comment string) error
-	DisputeComplaint(id string, userID string, reason string) error
+	DisputeComplaint(id string, userID string, reason string, images []string) error
 	GetRatingSummaries(summaryType string) ([]ComplaintRatingSummary, error)
 	GetOverviewStats() (*ComplaintOverviewStats, error)
 }

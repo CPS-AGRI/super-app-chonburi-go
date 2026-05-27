@@ -77,7 +77,7 @@ func main() {
 
 	// Providers
 	emailSender := mail.NewSMTPEmailSender(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPEmail, cfg.SMTPPassword)
-	storageProvider := storage.NewLocalStorage("./uploads", "http://localhost:"+cfg.AppPort+"/uploads")
+	storageProvider := storage.NewMinIOStorage(minioClient)
 
 	// UseCases
 	authUC := usecase.NewAuthUseCase(adminRepo, rtRepo)
@@ -87,13 +87,13 @@ func main() {
 	complaintUC := usecase.NewComplaintUseCase(complaintRepo, adminRepo, muniRepo)
 	moduleUC := usecase.NewModuleUseCase(moduleRepo, adminRepo)
 	moduleTypeUC := usecase.NewModuleTypeUseCase(moduleTypeRepo)
-	muniUC := usecase.NewMunicipalityUseCase(muniRepo)
+	muniUC := usecase.NewMunicipalityUseCase(muniRepo, storageProvider)
 	muniBankUC := usecase.NewMunicipalityBankUseCase(muniBankRepo)
 	muniWorkScheduleUC := usecase.NewMunicipalityWorkScheduleUseCase(muniWorkScheduleRepo)
 	dashboardUC := usecase.NewDashboardUseCase(dashboardRepo)
 	taxUC := usecase.NewTaxUseCase(taxRepo)
 	taxNewUC := usecase.NewTaxNewUseCase(taxNewRepo, emailSender, "")
-	publicRelationUC := usecase.NewPublicRelationUseCase(publicRelationRepo, adminRepo)
+	publicRelationUC := usecase.NewPublicRelationUseCase(publicRelationRepo, adminRepo, storageProvider)
 	verificationUC := usecase.NewVerificationUseCase(verificationRepo)
 
 	// Handlers
