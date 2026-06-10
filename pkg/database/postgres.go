@@ -57,9 +57,6 @@ func ConnectDB(cfg *config.Config) {
 		&domain.AppUser{},
 		&domain.UserInformation{},
 		&domain.UserActivityTracking{},
-		&domain.ModuleOnlineTaxPayment{},
-		&domain.ModuleOnlineTaxPaymentInformation{},
-		&domain.ModuleOnlineTaxPaymentLog{},
 		&domain.PublicRelation{},
 		&domain.PublicRelationVisitorCount{},
 		&domain.PublicRelationNotification{},
@@ -69,6 +66,7 @@ func ConnectDB(cfg *config.Config) {
 		&domain.MunicipalityWelcomeScreen{},
 		&domain.ModuleNotification{},
 		&domain.ModuleUserNotification{},
+		&domain.ModuleDeviceToken{},
 		&domain.UserFCMToken{},
 		&domain.TaxRate{},
 		&domain.TaxBusiness{},
@@ -81,7 +79,6 @@ func ConnectDB(cfg *config.Config) {
 		log.Fatalf("Fatal: Failed to auto-migrate: %v", err)
 	}
 
-	// Trigger Seeding
 	Seed()
 
 	log.Println("Database initialized and seeded successfully.")

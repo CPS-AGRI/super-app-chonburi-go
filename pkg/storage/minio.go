@@ -14,7 +14,6 @@ type minioStorage struct {
 	client *minio.Client
 }
 
-// NewMinIOStorage creates a new StorageProvider using MinIO client
 func NewMinIOStorage(client *minio.Client) StorageProvider {
 	return &minioStorage{client: client}
 }

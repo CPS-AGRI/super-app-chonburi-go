@@ -15,7 +15,6 @@ type taxNewRepository struct {
 	db *gorm.DB
 }
 
-// NewTaxNewRepository creates a new repository for the self-declaration tax module
 func NewTaxNewRepository(db *gorm.DB) domain.TaxNewRepository {
 	return &taxNewRepository{db: db}
 }
@@ -83,7 +82,7 @@ func (r *taxNewRepository) CreateReconciliationRecord(record *domain.BankReconci
 
 func (r *taxNewRepository) GetDeclarationByRefs(ref1, ref2 string) (*domain.TaxDeclaration, error) {
 	var declaration domain.TaxDeclaration
-	// Match by clean ref1 and ref2 (trimming spaces if database padded them)
+
 	err := r.db.Preload("Business").Where("TRIM(ref1) = TRIM(?) AND TRIM(ref2) = TRIM(?)", ref1, ref2).First(&declaration).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -111,11 +110,9 @@ func (r *taxNewRepository) GetDashboardSummary(startDate, endDate time.Time) (*d
 	var totalRevenue float64
 	var totalTransactions int64
 
-	// Start of Day for startDate, End of Day for endDate to ensure full coverage
 	startOfDay := time.Date(startDate.Year(), startDate.Month(), startDate.Day(), 0, 0, 0, 0, startDate.Location())
 	endOfDay := time.Date(endDate.Year(), endDate.Month(), endDate.Day(), 23, 59, 59, 999999999, endDate.Location())
 
-	// 1. Total Paid Revenue & Count
 	err := r.db.Model(&domain.TaxDeclaration{}).
 		Where("payment_status IN ? AND paid_at BETWEEN ? AND ?", []string{"paid", "verified", "audit_failed"}, startOfDay, endOfDay).
 		Select("COALESCE(SUM(calculated_tax), 0)").
@@ -131,7 +128,6 @@ func (r *taxNewRepository) GetDashboardSummary(startDate, endDate time.Time) (*d
 		return nil, err
 	}
 
-	// 2. Breakdown by tax type
 	type BreakdownRow struct {
 		TaxType string  `gorm:"column:tax_type"`
 		Amount  float64 `gorm:"column:amount"`
@@ -148,9 +144,9 @@ func (r *taxNewRepository) GetDashboardSummary(startDate, endDate time.Time) (*d
 	}
 
 	breakdown := map[string]domain.TaxCategorySummary{
-		"hotel_fee":    {Amount: 0, Count: 0},
-		"oil_gas_tax":  {Amount: 0, Count: 0},
-		"tobacco_tax":  {Amount: 0, Count: 0},
+		"hotel_fee":   {Amount: 0, Count: 0},
+		"oil_gas_tax": {Amount: 0, Count: 0},
+		"tobacco_tax": {Amount: 0, Count: 0},
 	}
 	for _, row := range dbRows {
 		breakdown[row.TaxType] = domain.TaxCategorySummary{
@@ -159,14 +155,13 @@ func (r *taxNewRepository) GetDashboardSummary(startDate, endDate time.Time) (*d
 		}
 	}
 
-	// 3. Daily trends
 	type TrendRow struct {
 		DateStr string  `gorm:"column:date_str"`
 		TaxType string  `gorm:"column:tax_type"`
 		Amount  float64 `gorm:"column:amount"`
 	}
 	var trendRows []TrendRow
-	// Format date in PostgreSQL
+
 	err = r.db.Model(&domain.TaxDeclaration{}).
 		Where("payment_status IN ? AND paid_at BETWEEN ? AND ?", []string{"paid", "verified", "audit_failed"}, startOfDay, endOfDay).
 		Select("TO_CHAR(paid_at, 'YYYY-MM-DD') as date_str, tax_type, COALESCE(SUM(calculated_tax), 0) as amount").
@@ -217,7 +212,7 @@ func (r *taxNewRepository) GetDashboardSummary(startDate, endDate time.Time) (*d
 
 func (r *taxNewRepository) UpsertBusiness(business *domain.TaxBusiness) error {
 	return r.db.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "business_reg_number"}},
+		Columns: []clause.Column{{Name: "business_reg_number"}},
 		DoUpdates: clause.AssignmentColumns([]string{
 			"name_th",
 			"name_en",
@@ -232,7 +227,7 @@ func (r *taxNewRepository) UpsertBusiness(business *domain.TaxBusiness) error {
 	}).Create(business).Error
 }
 
-func (r *taxNewRepository) ListDeclarations(taxType, status, search string, limit, offset int) ([]domain.TaxDeclaration, int64, error) {
+func (r *taxNewRepository) ListDeclarations(taxType, status, search string, startDate, endDate *time.Time, limit, offset int) ([]domain.TaxDeclaration, int64, error) {
 	var declarations []domain.TaxDeclaration
 	var total int64
 
@@ -246,6 +241,16 @@ func (r *taxNewRepository) ListDeclarations(taxType, status, search string, limi
 		query = query.Where("tax_declarations.payment_status = ?", status)
 	}
 
+	if startDate != nil {
+		startOfDay := time.Date(startDate.Year(), startDate.Month(), startDate.Day(), 0, 0, 0, 0, startDate.Location())
+		query = query.Where("tax_declarations.created_at >= ?", startOfDay)
+	}
+
+	if endDate != nil {
+		endOfDay := time.Date(endDate.Year(), endDate.Month(), endDate.Day(), 23, 59, 59, 999999999, endDate.Location())
+		query = query.Where("tax_declarations.created_at <= ?", endOfDay)
+	}
+
 	if search != "" {
 		query = query.Joins("JOIN tax_businesses ON tax_businesses.id = tax_declarations.business_id").
 			Where("tax_declarations.business_reg_number LIKE ? OR tax_businesses.name_th LIKE ?", "%"+search+"%", "%"+search+"%")
@@ -256,7 +261,6 @@ func (r *taxNewRepository) ListDeclarations(taxType, status, search string, limi
 		return nil, 0, err
 	}
 
-	// For GORM, if we joined, we should select the main table columns to avoid column overlap
 	if search != "" {
 		query = query.Select("tax_declarations.*")
 	}
@@ -272,3 +276,14 @@ func (r *taxNewRepository) ListDeclarations(taxType, status, search string, limi
 	return declarations, total, nil
 }
 
+func (r *taxNewRepository) GetUserInformationByPhoneOrEmail(phone *string, email string) (*domain.UserInformation, error) {
+	var userInfo domain.UserInformation
+	err := r.db.Where("phone = ? OR email = ?", phone, email).First(&userInfo).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &userInfo, nil
+}

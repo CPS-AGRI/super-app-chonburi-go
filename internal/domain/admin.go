@@ -1,4 +1,4 @@
-package domain // MueangSmart Core Domain
+package domain
 
 import (
 	"time"
@@ -6,14 +6,12 @@ import (
 	"github.com/google/uuid"
 )
 
-// User interface
 type User interface {
 	GetID() string
 	GetEmail() string
 	GetRole() string
 }
 
-// admin_roles
 type AdminRole struct {
 	ID                 string    `gorm:"type:uuid;primaryKey;column:id" json:"id"`
 	NameTh             string    `gorm:"not null;column:name_th;index" json:"name_th"`
@@ -30,7 +28,6 @@ type AdminRole struct {
 
 func (AdminRole) TableName() string { return "admin_roles" }
 
-// modules
 type Module struct {
 	ID                                 string    `gorm:"type:uuid;primaryKey;column:id" json:"id"`
 	NameTh                             string    `gorm:"not null;default:'';column:name_th" json:"name_th"`
@@ -53,7 +50,6 @@ type Module struct {
 
 func (Module) TableName() string { return "modules" }
 
-// module_types
 type ModuleType struct {
 	ID                                 string    `gorm:"type:uuid;primaryKey;column:id" json:"id"`
 	ModuleId                           string    `gorm:"type:uuid;not null;column:module_id" json:"module_id"`
@@ -70,16 +66,15 @@ type ModuleType struct {
 
 func (ModuleType) TableName() string { return "module_types" }
 
-// departments
 type Department struct {
-	ID           string    `gorm:"type:uuid;primaryKey;column:id" json:"id"`
-	Name         string    `gorm:"not null;column:name;index" json:"name"`
-	Status       string    `gorm:"not null;column:status;index" json:"status"`
-	Description  *string   `gorm:"column:description" json:"description"`
-	CreatedBy    string    `gorm:"not null;default:'';column:created_by" json:"created_by"`
-	CreatedDate  time.Time `gorm:"not null;type:timestamptz;default:'-infinity';column:created_date" json:"created_date"`
-	UpdatedBy    string    `gorm:"not null;default:'';column:updated_by" json:"updated_by"`
-	UpdatedDate  time.Time `gorm:"not null;type:timestamptz;default:'-infinity';column:updated_date" json:"updated_date"`
+	ID            string    `gorm:"type:uuid;primaryKey;column:id" json:"id"`
+	Name          string    `gorm:"not null;column:name;index" json:"name"`
+	Status        string    `gorm:"not null;column:status;index" json:"status"`
+	Description   *string   `gorm:"column:description" json:"description"`
+	CreatedBy     string    `gorm:"not null;default:'';column:created_by" json:"created_by"`
+	CreatedDate   time.Time `gorm:"not null;type:timestamptz;default:'-infinity';column:created_date" json:"created_date"`
+	UpdatedBy     string    `gorm:"not null;default:'';column:updated_by" json:"updated_by"`
+	UpdatedDate   time.Time `gorm:"not null;type:timestamptz;default:'-infinity';column:updated_date" json:"updated_date"`
 	Modules       []Module  `gorm:"many2many:department_modules;" json:"modules,omitempty"`
 	ModuleTypeIds []string  `gorm:"-" json:"module_type_ids,omitempty"`
 	ModuleIds     []string  `gorm:"-" json:"module_ids,omitempty"`
@@ -87,8 +82,6 @@ type Department struct {
 
 func (Department) TableName() string { return "departments" }
 
-// Bridge tables (don't usually need Audit, but added for consistency if needed)
-// Bridge tables
 type DepartmentModule struct {
 	ID           string    `gorm:"type:uuid;primaryKey;column:id" json:"id"`
 	DepartmentId string    `gorm:"type:uuid;not null;column:department_id;index" json:"department_id"`
@@ -108,7 +101,6 @@ type DepartmentModuleModuleType struct {
 
 func (DepartmentModuleModuleType) TableName() string { return "department_module_module_types" }
 
-// admin_users
 type Admin struct {
 	ID                        string    `gorm:"type:uuid;primaryKey;column:id" json:"id"`
 	Name                      string    `gorm:"not null;column:name;index" json:"name"`
@@ -141,7 +133,6 @@ func (a Admin) GetRole() string {
 }
 func (Admin) TableName() string { return "admin_users" }
 
-// refresh_tokens
 type AdminRefreshToken struct {
 	ID          string    `gorm:"type:uuid;primaryKey;column:id" json:"id"`
 	Token       string    `gorm:"unique;not null;column:token;index" json:"token"`
@@ -152,9 +143,9 @@ type AdminRefreshToken struct {
 	UpdatedBy   string    `gorm:"not null;default:'';column:updated_by" json:"updated_by"`
 	UpdatedDate time.Time `gorm:"not null;type:timestamptz;default:'-infinity';column:updated_date" json:"updated_date"`
 }
+
 func (AdminRefreshToken) TableName() string { return "admin_refresh_tokens" }
 
-// audit_logs
 type AuditLog struct {
 	ID                 string    `gorm:"type:uuid;primaryKey;column:id" json:"id"`
 	TraceId            string    `gorm:"not null;column:trace_id;index" json:"trace_id"`
@@ -167,14 +158,13 @@ type AuditLog struct {
 	RequestTime        time.Time `gorm:"not null;type:timestamptz;column:request_time" json:"request_time"`
 	ResponseTime       time.Time `gorm:"not null;type:timestamptz;column:response_time" json:"response_time"`
 }
+
 func (AuditLog) TableName() string { return "audit_logs" }
 
-// Helper
 func NewUUID() string {
 	return uuid.New().String()
 }
 
-// Interfaces
 type AdminRepository interface {
 	GetByEmail(email string) (*Admin, error)
 	GetByID(id string) (*Admin, error)
@@ -276,7 +266,6 @@ type AuthUseCase interface {
 	Me(id string) (*Admin, []string, error)
 }
 
-// Queries
 type LoginRequest struct {
 	Email    string `json:"email" validate:"required,email"`
 	Password string `json:"password" validate:"required"`
@@ -303,14 +292,14 @@ type DepartmentQuery struct {
 	Status     string
 }
 
-type PaginatedResponse struct {
-	Items       interface{} `json:"items"`
-	TotalItems  int64       `json:"total_items"`
-	PageNumber  int         `json:"page_number"`
-	PageSize    int         `json:"page_size"`
-	TotalPages  int         `json:"total_pages"`
-	HasNext     bool        `json:"has_next"`
-	HasPrevious bool        `json:"has_previous"`
+type PaginatedResponse[T any] struct {
+	Items       T     `json:"items"`
+	TotalItems  int64 `json:"total_items"`
+	PageNumber  int   `json:"page_number"`
+	PageSize    int   `json:"page_size"`
+	TotalPages  int   `json:"total_pages"`
+	HasNext     bool  `json:"has_next"`
+	HasPrevious bool  `json:"has_previous"`
 }
 
 type PaginatedDepartmentResponse struct {

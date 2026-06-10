@@ -29,8 +29,8 @@ type UserVerificationItem struct {
 	LastName                  string     `json:"last_name"`
 	Phone                     string     `json:"phone"`
 	Email                     *string    `json:"email"`
-	IdentityNumber            string     `json:"identity_number"` // Decrypted in code or raw
-	LaserID                   string     `json:"laser_id"`        // Decrypted in code or raw
+	IdentityNumber            string     `json:"identity_number"`
+	LaserID                   string     `json:"laser_id"`
 	IdCardType                *int       `json:"id_card_type"`
 	IdCardPhotoUrl            *string    `json:"id_card_photo_url"`
 	IdCardExpiry              *time.Time `json:"id_card_expiry"`

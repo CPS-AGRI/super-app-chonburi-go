@@ -13,7 +13,7 @@ type localStorage struct {
 }
 
 func NewLocalStorage(baseDir, baseURL string) StorageProvider {
-	// Ensure directory exists
+
 	_ = os.MkdirAll(baseDir, 0755)
 	return &localStorage{baseDir: baseDir, baseURL: baseURL}
 }

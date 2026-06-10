@@ -1,8 +1,9 @@
 package http
 
 import (
-	"github.com/gofiber/fiber/v3"
 	"super-app-chonburi-go/internal/domain"
+
+	"github.com/gofiber/fiber/v3"
 )
 
 type AdminRoleHandler struct {

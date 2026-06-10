@@ -19,7 +19,7 @@ func (h *DepartmentHandler) RegisterRoutes(router fiber.Router) {
 	group := router.Group("/departments", jwtutil.RequireAuth())
 	group.Get("", h.GetDepartments)
 	group.Get("/all", h.GetDepartmentsAll)
-	group.Get("/list", h.GetDepartmentsAll) // Alias for frontend
+	group.Get("/list", h.GetDepartmentsAll)
 	group.Get("/:id", h.GetByID)
 	group.Post("", h.Create)
 	group.Put("/:id", h.Update)

@@ -18,11 +18,8 @@ func NewMunicipalityBankHandler(uc domain.MunicipalityBankUseCase) *Municipality
 
 func (h *MunicipalityBankHandler) RegisterRoutes(router fiber.Router) {
 	bank := router.Group("/municipalities/bank")
-	
-	// Public or Authenticated depending on requirements.
-	// Frontend seems to call /municipalities/bank/default without issues, but let's assume it needs auth or doesn't.
-	// We will protect the routes.
-	bank.Get("/default", h.GetActiveBank) // Usually needed publicly or by authenticated users
+
+	bank.Get("/default", h.GetActiveBank)
 
 	protected := bank.Group("", jwtutil.RequireAuth())
 	protected.Get("/", h.GetAllBanks)

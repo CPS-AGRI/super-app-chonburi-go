@@ -64,7 +64,6 @@ func (u *adminUseCase) CreateAdmin(admin *domain.Admin) error {
 	admin.CreatedDate = time.Now()
 	admin.UpdatedDate = time.Now()
 
-	// Map Department IDs to objects
 	admin.Departments = []domain.Department{}
 	for _, deptID := range admin.DepartmentIds {
 		admin.Departments = append(admin.Departments, domain.Department{ID: deptID})
@@ -96,7 +95,6 @@ func (u *adminUseCase) UpdateAdmin(admin *domain.Admin) error {
 		existingAdmin.PasswordHash = string(hashed)
 	}
 
-	// Map Department IDs to objects
 	existingAdmin.Departments = []domain.Department{}
 	for _, deptID := range admin.DepartmentIds {
 		existingAdmin.Departments = append(existingAdmin.Departments, domain.Department{ID: deptID})

@@ -38,7 +38,7 @@ func (u *municipalityUseCase) uploadBase64Image(base64Str string) (string, error
 		return base64Str, nil
 	}
 
-	metaPart := parts[0] // e.g. "data:image/png"
+	metaPart := parts[0]
 	dataPart := parts[1]
 
 	var extension string
@@ -51,7 +51,7 @@ func (u *municipalityUseCase) uploadBase64Image(base64Str string) (string, error
 	} else if strings.Contains(metaPart, "image/gif") {
 		extension = ".gif"
 	} else {
-		extension = ".jpg" // fallback
+		extension = ".jpg"
 	}
 
 	data, err := base64.StdEncoding.DecodeString(dataPart)
@@ -81,7 +81,6 @@ func (u *municipalityUseCase) GetDetail(id uuid.UUID) (*domain.Municipality, err
 func (u *municipalityUseCase) Create(muni *domain.Municipality) error {
 	muni.ID = uuid.New()
 
-	// Auto-upload base64 logo if present
 	if muni.CityLogoUrl != "" {
 		minioUrl, err := u.uploadBase64Image(muni.CityLogoUrl)
 		if err != nil {
@@ -94,7 +93,7 @@ func (u *municipalityUseCase) Create(muni *domain.Municipality) error {
 }
 
 func (u *municipalityUseCase) Update(muni *domain.Municipality) error {
-	// Auto-upload base64 logo if present
+
 	if muni.CityLogoUrl != "" {
 		minioUrl, err := u.uploadBase64Image(muni.CityLogoUrl)
 		if err != nil {
@@ -114,7 +113,6 @@ func (u *municipalityUseCase) GetCurrent() (*domain.Municipality, error) {
 	return u.repo.GetFirst()
 }
 
-// Error definitions
 var (
 	ErrMunicipalityNotFound = errors.New("municipality not found")
 )

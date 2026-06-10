@@ -21,7 +21,7 @@ func (h *MunicipalityHandler) RegisterRoutes(router fiber.Router) {
 
 	muni := router.Group("/municipalities")
 	muni.Use(jwtutil.RequireAuth())
-	
+
 	muni.Get("/", h.GetList)
 	muni.Post("/", h.Create)
 	muni.Get("/:id", h.GetDetail)
@@ -32,7 +32,7 @@ func (h *MunicipalityHandler) RegisterRoutes(router fiber.Router) {
 func (h *MunicipalityHandler) GetPublicInfo(c fiber.Ctx) error {
 	muni, err := h.uc.GetCurrent()
 	if err != nil {
-		return SuccessResponse(c, nil)
+		return SuccessResponse[*domain.Municipality](c, nil)
 	}
 	return SuccessResponse(c, muni)
 }

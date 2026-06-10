@@ -22,10 +22,8 @@ func (h *PublicRelationHandler) RegisterRoutes(router fiber.Router) {
 	group := router.Group("/modules/:moduleId/public-relations")
 	group.Use(jwtutil.RequireAuth())
 
-	// Dashboard
 	group.Get("/dashboard", h.GetDashboardStats)
 
-	// Notifications (Registered before parameterized /:id route to avoid routing conflicts)
 	group.Get("/notifications", h.GetPaginatedNotifications)
 	group.Get("/notifications/histories", h.GetNotificationHistories)
 	group.Get("/notifications/:id", h.GetNotificationByID)
@@ -33,7 +31,6 @@ func (h *PublicRelationHandler) RegisterRoutes(router fiber.Router) {
 	group.Put("/notifications/:id", h.UpdateNotification)
 	group.Delete("/notifications/:id", h.DeleteNotification)
 
-	// News
 	group.Get("/", h.GetPaginated)
 	group.Get("/:id", h.GetByID)
 	group.Post("/", h.Create)
@@ -50,7 +47,6 @@ func (h *PublicRelationHandler) RegisterGlobalRoutes(router fiber.Router) {
 	group.Put("/", h.UploadWelcomeScreen)
 }
 
-// Dashboard
 func (h *PublicRelationHandler) GetDashboardStats(c fiber.Ctx) error {
 	moduleId := c.Params("moduleId")
 	stats, err := h.uc.GetDashboardStats(moduleId)
@@ -71,7 +67,6 @@ func (h *PublicRelationHandler) GetDashboardStats(c fiber.Ctx) error {
 	})
 }
 
-// News
 func (h *PublicRelationHandler) GetPaginated(c fiber.Ctx) error {
 	moduleId := c.Params("moduleId")
 	page, _ := strconv.Atoi(c.Query("page_number", "1"))
@@ -214,7 +209,6 @@ func (h *PublicRelationHandler) ShowComment(c fiber.Ctx) error {
 	return c.JSON(fiber.Map{"success": true, "message": "comment shown successfully"})
 }
 
-// Notifications
 func (h *PublicRelationHandler) GetPaginatedNotifications(c fiber.Ctx) error {
 	moduleId := c.Params("moduleId")
 	log.Printf("[DEBUG] PublicRelation GetPaginatedNotifications called. moduleId: %s", moduleId)
@@ -362,7 +356,6 @@ func (h *PublicRelationHandler) DeleteNotification(c fiber.Ctx) error {
 	return c.JSON(fiber.Map{"success": true, "message": "deleted successfully"})
 }
 
-// Welcome Screen
 func (h *PublicRelationHandler) GetWelcomeScreens(c fiber.Ctx) error {
 	screens, err := h.uc.GetWelcomeScreens()
 	if err != nil {

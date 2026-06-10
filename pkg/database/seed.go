@@ -40,7 +40,7 @@ func seedTaxRates() {
 		var existing domain.TaxRate
 		err := DB.Where("tax_type = ?", rate.TaxType).First(&existing).Error
 		if err != nil {
-			// Not found, create
+
 			if err := DB.Create(&rate).Error; err != nil {
 				log.Printf("Failed to seed tax rate %s: %v", rate.TaxType, err)
 			} else {
@@ -114,7 +114,7 @@ func seedTaxBusinesses() {
 		var existing domain.TaxBusiness
 		err := DB.Where("business_reg_number = ?", biz.BusinessRegNumber).First(&existing).Error
 		if err != nil {
-			// Not found, create
+
 			if err := DB.Create(&biz).Error; err != nil {
 				log.Printf("Failed to seed tax business %s: %v", biz.BusinessRegNumber, err)
 			} else {
@@ -125,4 +125,3 @@ func seedTaxBusinesses() {
 		}
 	}
 }
-

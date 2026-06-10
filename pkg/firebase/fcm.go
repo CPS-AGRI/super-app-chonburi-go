@@ -10,7 +10,7 @@ import (
 )
 
 type FCMMessage struct {
-	RegistrationIDs []string       `json:"registration_ids"`
+	RegistrationIDs []string        `json:"registration_ids"`
 	Notification    FCMNotification `json:"notification"`
 }
 
@@ -32,7 +32,6 @@ func SendPushNotification(tokens []string, title string, body string) {
 		return
 	}
 
-	// Legacy FCM API endpoint (simplest to call without service account token exchange setup in Go)
 	url := "https://fcm.googleapis.com/fcm/send"
 	payload := FCMMessage{
 		RegistrationIDs: tokens,

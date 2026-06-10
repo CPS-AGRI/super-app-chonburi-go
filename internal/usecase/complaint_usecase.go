@@ -35,7 +35,6 @@ func (u *complaintUseCase) GetComplaints(query domain.ComplaintQuery, adminID st
 		query.AdminRoleType = admin.Role.Type
 	}
 
-	// Populate Admin Department IDs
 	var deptIDs []string
 	var allowedModuleTypeIDs []string
 	isCenter := false
@@ -43,7 +42,6 @@ func (u *complaintUseCase) GetComplaints(query domain.ComplaintQuery, adminID st
 	for _, dept := range admin.Departments {
 		deptIDs = append(deptIDs, dept.ID)
 
-		// Check if this department has the Complaint Center module
 		for _, mod := range dept.Modules {
 			nameTh := strings.ToLower(mod.NameTh)
 			nameEn := strings.ToLower(mod.NameEn)
@@ -56,7 +54,6 @@ func (u *complaintUseCase) GetComplaints(query domain.ComplaintQuery, adminID st
 		}
 	}
 
-	// Fix Filtering Bug: Get strictly assigned ModuleType IDs from bridge table
 	if len(deptIDs) > 0 {
 		allowedModuleTypeIDs, _ = u.complaintRepo.GetAllowedModuleTypeIDs(deptIDs)
 	}
@@ -64,10 +61,13 @@ func (u *complaintUseCase) GetComplaints(query domain.ComplaintQuery, adminID st
 	query.AdminDepartmentIDs = deptIDs
 	query.IsComplaintCenter = isCenter
 	query.AllowedModuleTypeIDs = allowedModuleTypeIDs
-	
-	// Default pagination
-	if query.PageNumber < 1 { query.PageNumber = 1 }
-	if query.PageSize < 1 { query.PageSize = 10 }
+
+	if query.PageNumber < 1 {
+		query.PageNumber = 1
+	}
+	if query.PageSize < 1 {
+		query.PageSize = 10
+	}
 
 	return u.complaintRepo.GetPaginated(query)
 }
@@ -81,13 +81,57 @@ func (u *complaintUseCase) GetComplaintByID(id string, adminID string) (*domain.
 	return u.complaintRepo.GetByID(id, nil, admin.Role != nil && admin.Role.Type == "super_admin")
 }
 
+func getThaiComplaintStatus(status string) string {
+	switch status {
+	case domain.ComplaintStatusPending:
+		return "รอดำเนินการ"
+	case domain.ComplaintStatusReceived:
+		return "รับเรื่องแล้ว"
+	case domain.ComplaintStatusInProgress:
+		return "กำลังดำเนินการ"
+	case domain.ComplaintStatusCompleted:
+		return "ดำเนินการเสร็จสิ้น"
+	case domain.ComplaintStatusRejected:
+		return "ปฏิเสธคำร้อง"
+	default:
+		return status
+	}
+}
+
 func (u *complaintUseCase) CreateComplaint(complaint *domain.Complaint) error {
 	complaint.ID = uuid.New()
 	complaint.Status = domain.ComplaintStatusPending
 	complaint.CreatedDate = time.Now()
 	complaint.UpdatedDate = time.Now()
 
-	return u.complaintRepo.Create(complaint)
+	err := u.complaintRepo.Create(complaint)
+	if err != nil {
+		return err
+	}
+
+	SendNotificationToUser(
+		complaint.UserId,
+		"ยื่นคำร้องร้องเรียนสำเร็จ",
+		fmt.Sprintf("เราได้รับเรื่องร้องเรียนเลขที่ %s เรียบร้อยแล้ว (สถานะ: รอดำเนินการ)", complaint.DocumentId),
+		complaint.ID.String(),
+		"pending",
+		"complaint",
+	)
+
+	deptID := ""
+	if complaint.DepartmentId != nil {
+		deptID = *complaint.DepartmentId
+	}
+	SendNotificationToDepartment(
+		deptID,
+		"",
+		"มีเรื่องร้องเรียนใหม่ส่งเข้ามา",
+		fmt.Sprintf("เรื่องร้องเรียนเลขที่ %s เรื่อง: %s รอนุมัติรับเรื่องและส่งต่อทำงาน", complaint.DocumentId, complaint.Description),
+		complaint.ID.String(),
+		"pending",
+	)
+
+	return nil
 }
 
 func (u *complaintUseCase) UpdateComplaintStatus(id string, status string, description string, adminID string, images []string) error {
@@ -95,7 +139,6 @@ func (u *complaintUseCase) UpdateComplaintStatus(id string, status string, descr
 	if err != nil {
 		return err
 	}
-
 
 	complaint.Status = status
 	complaint.UpdatedDate = time.Now()
@@ -127,7 +170,21 @@ func (u *complaintUseCase) UpdateComplaintStatus(id string, status string, descr
 		return err
 	}
 
-	return u.complaintRepo.Update(complaint)
+	err = u.complaintRepo.Update(complaint)
+	if err != nil {
+		return err
+	}
+
+	SendNotificationToUser(
+		complaint.UserId,
+		"อัปเดตสถานะเรื่องร้องเรียน",
+		fmt.Sprintf("เรื่องร้องเรียนเลขที่ %s ของท่านเปลี่ยนสถานะเป็น: %s (%s)", complaint.DocumentId, getThaiComplaintStatus(status), description),
+		complaint.ID.String(),
+		status,
+		"complaint",
+	)
+
+	return nil
 }
 
 func (u *complaintUseCase) ForwardComplaint(id string, departmentID string, description string, adminID string) error {
@@ -160,7 +217,30 @@ func (u *complaintUseCase) ForwardComplaint(id string, departmentID string, desc
 		return err
 	}
 
-	return u.complaintRepo.Update(complaint)
+	err = u.complaintRepo.Update(complaint)
+	if err != nil {
+		return err
+	}
+
+	SendNotificationToDepartment(
+		departmentID,
+		"",
+		"มีเรื่องร้องเรียนใหม่ส่งมอบหมายเข้ามา",
+		fmt.Sprintf("เรื่องร้องเรียนเลขที่ %s ได้รับการมอบหมายมายังแผนกของท่านเพื่อประสานงานดำเนินงาน", complaint.DocumentId),
+		complaint.ID.String(),
+		"received",
+	)
+
+	SendNotificationToUser(
+		complaint.UserId,
+		"เรื่องร้องเรียนถูกส่งมอบหมาย",
+		fmt.Sprintf("เรื่องร้องเรียนเลขที่ %s ของท่านได้รับการรับเรื่องแล้วและอยู่ระหว่างส่งมอบหมายหน่วยงานดูแล", complaint.DocumentId),
+		complaint.ID.String(),
+		"received",
+		"complaint",
+	)
+
+	return nil
 }
 
 func (u *complaintUseCase) AssignComplaint(id string, assigneeID string, description string, adminID string) error {
@@ -193,7 +273,33 @@ func (u *complaintUseCase) AssignComplaint(id string, assigneeID string, descrip
 		return err
 	}
 
-	return u.complaintRepo.Update(complaint)
+	err = u.complaintRepo.Update(complaint)
+	if err != nil {
+		return err
+	}
+
+	if parsedAssignee, err := uuid.Parse(assigneeID); err == nil {
+
+		SendNotificationToUser(
+			parsedAssignee,
+			"ท่านได้รับมอบหมายงานร้องทุกข์ใหม่",
+			fmt.Sprintf("คุณได้รับการแต่งตั้งเป็นผู้ดูแลเคสรหัส %s โปรดดำเนินการตรวจสอบเรื่องและอัปเดตความก้าวหน้า", complaint.DocumentId),
+			complaint.ID.String(),
+			"in_progress",
+			"complaint_assignee",
+		)
+	}
+
+	SendNotificationToUser(
+		complaint.UserId,
+		"เจ้าหน้าที่เริ่มดำเนินงานร้องเรียนของท่าน",
+		fmt.Sprintf("เรื่องร้องเรียนเลขที่ %s ของท่าน อยู่ระหว่างการลงพื้นที่จัดการโดยเจ้าหน้าที่ฝ่ายปฏิบัติงาน", complaint.DocumentId),
+		complaint.ID.String(),
+		"in_progress",
+		"complaint",
+	)
+
+	return nil
 }
 
 func (u *complaintUseCase) RejectComplaint(id string, reason string, adminID string) error {
@@ -202,19 +308,17 @@ func (u *complaintUseCase) RejectComplaint(id string, reason string, adminID str
 		return err
 	}
 
-	// Handle Workflow Modes
 	muni, err := u.muniRepo.GetFirst()
 	status := domain.ComplaintStatusRejected
 	var activityDesc string
 
-	// Always clear department on reject so it disappears from the department's manage table
 	complaint.DepartmentId = nil
 
 	if err == nil && muni.ComplaintMode == "direct" {
-		// Option 1: Direct Mode - mark as rejected for internal review/history
+
 		activityDesc = "ตีกลับเรื่อง (ถูกปฏิเสธ): " + reason
 	} else {
-		// Option 2: Central Mode - Return to Center
+
 		activityDesc = "ตีกลับเรื่องไปยังศูนย์ร้องทุกข์: " + reason
 	}
 
@@ -236,7 +340,21 @@ func (u *complaintUseCase) RejectComplaint(id string, reason string, adminID str
 		return err
 	}
 
-	return u.complaintRepo.Update(complaint)
+	err = u.complaintRepo.Update(complaint)
+	if err != nil {
+		return err
+	}
+
+	SendNotificationToUser(
+		complaint.UserId,
+		"เรื่องร้องเรียนได้รับการปฏิเสธคำร้อง/ตีกลับ",
+		fmt.Sprintf("คำร้องขอนอกเหนือนโยบาย เลขที่ %s: %s", complaint.DocumentId, reason),
+		complaint.ID.String(),
+		"rejected",
+		"complaint",
+	)
+
+	return nil
 }
 
 func (u *complaintUseCase) AddActivity(activity *domain.ComplaintActivity, adminID string) error {
@@ -245,7 +363,7 @@ func (u *complaintUseCase) AddActivity(activity *domain.ComplaintActivity, admin
 	activity.UpdatedBy = adminID
 	activity.CreatedDate = time.Now()
 	activity.UpdatedDate = time.Now()
-	
+
 	for i := range activity.Images {
 		activity.Images[i].ID = uuid.New()
 		activity.Images[i].CreatedBy = adminID
@@ -257,14 +375,28 @@ func (u *complaintUseCase) AddActivity(activity *domain.ComplaintActivity, admin
 		}
 	}
 
-	// Fetch main complaint to update its UpdatedDate and Status
 	complaint, err := u.complaintRepo.GetByID(activity.ModuleComplaintId.String(), nil, true)
 	if err == nil && complaint != nil {
 		if activity.Status != "" {
+			oldStatus := complaint.Status
 			complaint.Status = activity.Status
+			complaint.UpdatedDate = time.Now()
+			_ = u.complaintRepo.Update(complaint)
+
+			if oldStatus != activity.Status {
+				SendNotificationToUser(
+					complaint.UserId,
+					"อัปเดตสถานะเรื่องร้องเรียน",
+					fmt.Sprintf("เรื่องร้องเรียนเลขที่ %s ของท่านเปลี่ยนสถานะเป็น: %s (%s)", complaint.DocumentId, getThaiComplaintStatus(activity.Status), activity.Description),
+					complaint.ID.String(),
+					activity.Status,
+					"complaint",
+				)
+			}
+		} else {
+			complaint.UpdatedDate = time.Now()
+			_ = u.complaintRepo.Update(complaint)
 		}
-		complaint.UpdatedDate = time.Now()
-		_ = u.complaintRepo.Update(complaint)
 	}
 
 	return u.complaintRepo.CreateActivity(activity)
@@ -284,10 +416,8 @@ func (u *complaintUseCase) RateComplaint(id string, userID string, rating int, c
 		return fmt.Errorf("can only rate a completed complaint")
 	}
 
-	// 1. Get completer info for assignee_id and department_id
 	assigneeID, departmentID, _ := u.complaintRepo.GetCompleterInfo(id)
 
-	// 2. Create history record
 	history := &domain.ComplaintRatingHistory{
 		ID:                uuid.New(),
 		ModuleComplaintId: uuid.MustParse(id),
@@ -304,8 +434,7 @@ func (u *complaintUseCase) RateComplaint(id string, userID string, rating int, c
 		return err
 	}
 
-	// 3. Reset active dispute flag on the main complaint
-	complaint.IsDisputed = false 
+	complaint.IsDisputed = false
 	if err := u.complaintRepo.Update(complaint); err != nil {
 		return err
 	}
@@ -336,10 +465,8 @@ func (u *complaintUseCase) DisputeComplaint(id string, userID string, reason str
 		return fmt.Errorf("can only dispute a completed complaint")
 	}
 
-	// 1. Get completer info for assignee_id and department_id (the person who failed to complete the job)
 	assigneeID, departmentID, _ := u.complaintRepo.GetCompleterInfo(id)
 
-	// 2. Create history record
 	history := &domain.ComplaintRatingHistory{
 		ID:                uuid.New(),
 		ModuleComplaintId: uuid.MustParse(id),
@@ -357,22 +484,19 @@ func (u *complaintUseCase) DisputeComplaint(id string, userID string, reason str
 	}
 
 	muni, muniErr := u.muniRepo.GetFirst()
-
-	activityDesc := "ลูกค้าไม่พอใจผลการดำเนินงาน (direct): " + reason
 	if muniErr == nil && muni.ComplaintMode == "central" {
-		activityDesc = "ลูกค้าไม่พอใจผลการดำเนินงาน (central): " + reason
 		complaint.DepartmentId = nil
 	}
 
 	complaint.AssigneeId = nil
 	complaint.Status = domain.ComplaintStatusPending
 	complaint.UpdatedDate = time.Now()
-	complaint.IsDisputed = true // Mark as disputed in db to flag current active dispute state
+	complaint.IsDisputed = true
 
 	activity := &domain.ComplaintActivity{
 		ID:                uuid.New(),
 		ModuleComplaintId: uuid.MustParse(id),
-		Description:       activityDesc,
+		Description:       reason,
 		Status:            domain.ActivityStatusDisputeRequest,
 		CreatedBy:         userID,
 		UpdatedBy:         userID,

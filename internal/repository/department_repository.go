@@ -78,7 +78,7 @@ func (r *departmentRepository) GetAll() ([]domain.Department, error) {
 }
 
 func (r *departmentRepository) populateModules(tx *gorm.DB, dept *domain.Department) error {
-	// Find all DepartmentModules for this department
+
 	var deptModules []domain.DepartmentModule
 	if err := tx.Where("department_id = ?", dept.ID).Find(&deptModules).Error; err != nil {
 		return err
@@ -96,7 +96,6 @@ func (r *departmentRepository) populateModules(tx *gorm.DB, dept *domain.Departm
 			continue
 		}
 
-		// Find assigned ModuleTypes for this DepartmentModule
 		var typeIDs []string
 		tx.Model(&domain.DepartmentModuleModuleType{}).
 			Where("department_module_id = ?", dm.ID).
@@ -128,7 +127,7 @@ func (r *departmentRepository) Update(dept *domain.Department) error {
 		if err := tx.Save(dept).Error; err != nil {
 			return err
 		}
-		// Clear existing bridge data
+
 		var deptModules []domain.DepartmentModule
 		tx.Where("department_id = ?", dept.ID).Find(&deptModules)
 		for _, dm := range deptModules {
@@ -144,7 +143,6 @@ func (r *departmentRepository) assignModuleTypes(tx *gorm.DB, dept *domain.Depar
 	fmt.Printf("DEBUG: assignModuleTypes for Dept: %s\n", dept.ID)
 	fmt.Printf("DEBUG: ModuleIds: %v, ModuleTypeIds: %v\n", dept.ModuleIds, dept.ModuleTypeIds)
 
-	// 1. Handle Module Assignments (Direct)
 	uniqueModuleIDs := make(map[string]bool)
 	for _, id := range dept.ModuleIds {
 		if id != "" {
@@ -152,7 +150,6 @@ func (r *departmentRepository) assignModuleTypes(tx *gorm.DB, dept *domain.Depar
 		}
 	}
 
-	// Also include modules from module types
 	if len(dept.ModuleTypeIds) > 0 {
 		var moduleTypes []domain.ModuleType
 		if err := tx.Where("id IN ?", dept.ModuleTypeIds).Find(&moduleTypes).Error; err != nil {
@@ -166,7 +163,6 @@ func (r *departmentRepository) assignModuleTypes(tx *gorm.DB, dept *domain.Depar
 
 	fmt.Printf("DEBUG: Unique Module IDs to assign: %v\n", uniqueModuleIDs)
 
-	// Create DepartmentModule records
 	moduleToDMID := make(map[string]string)
 	for mID := range uniqueModuleIDs {
 		dm := domain.DepartmentModule{
@@ -186,7 +182,6 @@ func (r *departmentRepository) assignModuleTypes(tx *gorm.DB, dept *domain.Depar
 		fmt.Printf("DEBUG: Created department_module %s for module %s\n", dm.ID, mID)
 	}
 
-	// 2. Handle ModuleType Assignments
 	uniqueTypeIDs := make(map[string]bool)
 	for _, id := range dept.ModuleTypeIds {
 		if id != "" {
@@ -194,7 +189,6 @@ func (r *departmentRepository) assignModuleTypes(tx *gorm.DB, dept *domain.Depar
 		}
 	}
 
-	// AUTOMATICALLY add mandatory types for all assigned modules
 	var allModuleIDs []string
 	for id := range uniqueModuleIDs {
 		allModuleIDs = append(allModuleIDs, id)
@@ -216,7 +210,7 @@ func (r *departmentRepository) assignModuleTypes(tx *gorm.DB, dept *domain.Depar
 
 		var moduleTypes []domain.ModuleType
 		tx.Where("id IN ?", finalTypeIDs).Find(&moduleTypes)
-		
+
 		for _, mt := range moduleTypes {
 			dmID, ok := moduleToDMID[mt.ModuleId]
 			if !ok {
@@ -239,12 +233,11 @@ func (r *departmentRepository) assignModuleTypes(tx *gorm.DB, dept *domain.Depar
 
 func (r *departmentRepository) Delete(id string) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
-		// 1. Clear admin_departments associations
+
 		if err := tx.Exec("DELETE FROM admin_departments WHERE department_id = ?", id).Error; err != nil {
 			return err
 		}
 
-		// 2. Clear module types and modules associations
 		var deptModules []domain.DepartmentModule
 		if err := tx.Where("department_id = ?", id).Find(&deptModules).Error; err != nil {
 			return err
@@ -258,7 +251,6 @@ func (r *departmentRepository) Delete(id string) error {
 			return err
 		}
 
-		// 3. Finally, delete the department itself
 		return tx.Delete(&domain.Department{}, "id = ?", id).Error
 	})
 }

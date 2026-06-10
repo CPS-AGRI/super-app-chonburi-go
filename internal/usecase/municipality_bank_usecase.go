@@ -38,10 +38,9 @@ func (u *municipalityBankUseCase) SaveBank(bank *domain.MunicipalityBank) error 
 
 	bank.CreatedAt = existing.CreatedAt
 	bank.UpdatedAt = time.Now()
-	
-	// Ensure we don't accidentally wipe prompt_pay_number if not provided in update, or allow it
+
 	if bank.PromptPayNumber == "" && existing.PromptPayNumber != "" {
-		// Depending on business logic, we might keep it
+
 		bank.PromptPayNumber = existing.PromptPayNumber
 	}
 

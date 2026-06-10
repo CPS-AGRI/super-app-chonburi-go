@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"strconv"
 	"strings"
+	"super-app-chonburi-go/pkg/database"
 	"time"
 
 	"super-app-chonburi-go/internal/domain"
@@ -24,10 +26,9 @@ type taxNewUseCase struct {
 	billerID   string
 }
 
-// NewTaxNewUseCase creates a new usecase instance for the self-declaration tax module
 func NewTaxNewUseCase(repo domain.TaxNewRepository, mailSender mail.EmailSender, billerID string) domain.TaxNewUseCase {
 	if billerID == "" {
-		billerID = "099400016485800" // Default Chonburi PAO Biller ID
+		billerID = "099400016485800"
 	}
 	return &taxNewUseCase{
 		repo:       repo,
@@ -82,21 +83,17 @@ func (u *taxNewUseCase) DeclareTax(req domain.DeclareTaxRequest) (*domain.Declar
 		return nil, errors.New("active tax rate not found for tax type " + business.TaxType)
 	}
 
-	// 1. Calculate Tax
 	calculatedTax := req.MonthlyRevenue * rate.RateValue
 	if rate.RateUnit == "percentage" {
 		calculatedTax = req.MonthlyRevenue * (rate.RateValue / 100.0)
 	}
 
-	// 2. Determine Declaration Version
 	version, err := u.repo.GetLatestDeclarationVersion(req.BusinessRegNumber, business.TaxType, req.TaxMonth, req.TaxYear)
 	if err != nil {
 		return nil, err
 	}
 	newVersion := version + 1
 
-	// 3. Generate Ref1 & Ref2
-	// Ref1: RegNumber (7 digits) + TaxTypeCode (2 digits)
 	var typeCode string
 	switch business.TaxType {
 	case "hotel_fee":
@@ -110,16 +107,13 @@ func (u *taxNewUseCase) DeclareTax(req domain.DeclareTaxRequest) (*domain.Declar
 	}
 	ref1 := fmt.Sprintf("%s%s", business.BusinessRegNumber, typeCode)
 
-	// Ref2: Year (YYYY) + Month (MM) + Version (2 digits)
 	ref2 := fmt.Sprintf("%04d%02d%02d", req.TaxYear, req.TaxMonth, newVersion)
 
-	// 4. Generate PromptPay QR Content
 	qrContent, err := qr.GeneratePromptPayBillPayment(u.billerID, ref1, ref2, calculatedTax)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate promptpay QR: %w", err)
 	}
 
-	// 5. Create Tax Declaration Record
 	declaration := &domain.TaxDeclaration{
 		ID:                 uuid.New(),
 		BusinessID:         business.ID,
@@ -147,6 +141,16 @@ func (u *taxNewUseCase) DeclareTax(req domain.DeclareTaxRequest) (*domain.Declar
 		return nil, err
 	}
 
+	SendNotificationToDepartment(
+		"",
+		"officer",
+		"มีรายการยื่นแบบภาษีใหม่",
+		fmt.Sprintf("สถานประกอบการ %s ได้ยื่นแบบภาษี %s รอบประจำเดือน %s %d ยอดภาษีคำนวณ %s บาท รอตอบรับ",
+			business.NameTH, getTaxTypeNameTH(declaration.TaxType), getThaiMonthName(declaration.TaxMonth), declaration.TaxYear+543, formatWithCommas(declaration.CalculatedTax)),
+		declaration.ID.String(),
+		"pending",
+	)
+
 	return &domain.DeclareTaxResponse{
 		DeclarationID: declaration.ID,
 		CalculatedTax: declaration.CalculatedTax,
@@ -162,7 +166,7 @@ func (u *taxNewUseCase) GetDeclaration(id uuid.UUID) (*domain.TaxDeclaration, er
 }
 
 func (u *taxNewUseCase) UploadKTBFile(filename string, fileContent []byte, adminID uuid.UUID) (*domain.KTBReconciliationResponse, error) {
-	// Initialize Batch Record (will write to database later after calculating totals)
+
 	batch := &domain.BankReconciliationBatch{
 		ID:           uuid.New(),
 		Filename:     filename,
@@ -173,41 +177,72 @@ func (u *taxNewUseCase) UploadKTBFile(filename string, fileContent []byte, admin
 		CreatedAt:    time.Now(),
 	}
 
-	// Parse Fixed-Width file content line by line
 	lines := strings.Split(string(fileContent), "\n")
 	var records []*domain.BankReconciliationRecord
 
 	for _, line := range lines {
-		// Clean line endings
+
 		line = strings.TrimRight(line, "\r\n")
-		if len(line) < 120 {
-			continue // Skip invalid length lines (standard layout requires 120 bytes)
+		if line == "" {
+			continue
 		}
 
-		recordType := line[0:2]
-		if recordType != "02" {
-			continue // Skip Header (01) or Total (09) records
+		var recordType string
+		var payDateStr string
+		var ref1 string
+		var ref2 string
+		var amountStr string
+
+		if len(line) >= 120 {
+			recordType = line[0:2]
+			if recordType != "02" {
+				continue
+			}
+
+			payDateStr = line[2:10]
+			ref1 = strings.TrimSpace(line[16:36])
+			ref2 = strings.TrimSpace(line[36:56])
+			amountStr = line[56:69]
+		} else {
+
+			parts := strings.Fields(line)
+			if len(parts) < 3 {
+				continue
+			}
+
+			firstPart := parts[0]
+			if len(firstPart) < 16 {
+				continue
+			}
+
+			recordType = firstPart[0:2]
+			if recordType != "02" {
+				continue
+			}
+
+			payDateStr = firstPart[2:10]
+			ref1 = firstPart[16:]
+			ref2 = strings.TrimSpace(parts[1])
+			amountStr = strings.TrimSpace(parts[2])
 		}
 
 		batch.RecordCount++
 
-		// Extract fields based on specs
-		payDateStr := line[2:10] // YYYYMMDD
-		ref1 := strings.TrimSpace(line[16:36])
-		ref2 := strings.TrimSpace(line[36:56])
-		amountStr := line[56:69] // 13 digits, last 2 are decimal places
-
-		// Parse Payment Date
 		payDate, err := time.Parse("20060102", payDateStr)
 		if err != nil {
 			payDate = time.Now()
 		}
 
-		// Parse Amount
-		amountInt, err := strconv.ParseInt(amountStr, 10, 64)
-		amount := float64(amountInt) / 100.0
-		if err != nil {
-			amount = 0.0
+		amountStrClean := strings.ReplaceAll(amountStr, ",", "")
+		var amount float64
+		if strings.Contains(amountStrClean, ".") {
+			if val, err := strconv.ParseFloat(amountStrClean, 64); err == nil {
+				amount = val
+			}
+		} else {
+			if amountInt, err := strconv.ParseInt(amountStrClean, 10, 64); err == nil {
+				amount = float64(amountInt) / 100.0
+			}
 		}
 
 		batch.TotalAmount += amount
@@ -227,24 +262,30 @@ func (u *taxNewUseCase) UploadKTBFile(filename string, fileContent []byte, admin
 		records = append(records, record)
 	}
 
-	// Identify matches to get the final MatchedCount before writing the batch
 	for _, record := range records {
 		decl, err := u.repo.GetDeclarationByRefs(record.Ref1, record.Ref2)
-		if err == nil && decl != nil {
-			if decl.CalculatedTax == record.Amount {
+		if err != nil {
+			log.Printf("[RECON] Error finding declaration for Ref1=%s, Ref2=%s: %v", record.Ref1, record.Ref2, err)
+		} else if decl == nil {
+			log.Printf("[RECON] No declaration found for Ref1=%s, Ref2=%s", record.Ref1, record.Ref2)
+		} else {
+			log.Printf("[RECON] Found matching declaration ID=%s for Ref1=%s, Ref2=%s. CalculatedTax=%f, RecordAmount=%f", decl.ID, record.Ref1, record.Ref2, decl.CalculatedTax, record.Amount)
+			if math.Abs(decl.CalculatedTax-record.Amount) < 0.01 {
 				record.IsMatched = true
 				batch.MatchedCount++
+				log.Printf("[RECON] Match SUCCESS for Ref1=%s, Ref2=%s", record.Ref1, record.Ref2)
+			} else {
+				log.Printf("[RECON] Match FAILED due to amount difference. CalculatedTax=%f != RecordAmount=%f", decl.CalculatedTax, record.Amount)
 			}
 		}
 	}
 
-	// Save Batch Summary with correct final counts and totals
 	err := u.repo.CreateReconciliationBatch(batch)
 	if err != nil {
 		return nil, err
 	}
 
-	// Save Reconciliation Records and Update Declarations
+	matchedItems := []domain.MatchedRecordDTO{}
 	for _, record := range records {
 		err := u.repo.CreateReconciliationRecord(record)
 		if err != nil {
@@ -262,8 +303,35 @@ func (u *taxNewUseCase) UploadKTBFile(filename string, fileContent []byte, admin
 
 				err = u.repo.UpdateDeclaration(decl)
 				if err == nil {
-					// Send Payment Email Confirmation
 					u.sendPaymentSuccessEmail(decl)
+
+					userInfo, dbErr := u.repo.GetUserInformationByPhoneOrEmail(decl.PayerPhone, decl.PayerEmail)
+					if dbErr == nil && userInfo != nil {
+						SendNotificationToUser(
+							userInfo.UserId,
+							"รับชำระเงินภาษีสำเร็จ",
+							fmt.Sprintf("อบจ. ชลบุรี ได้รับเงินค่าภาษี %s รอบ %s %d จำนวน %s บาท เรียบร้อยแล้ว",
+								getTaxTypeNameTH(decl.TaxType), getThaiMonthName(decl.TaxMonth), decl.TaxYear+543, formatWithCommas(*decl.PaidAmount)),
+							decl.ID.String(),
+							"paid",
+							"tax",
+						)
+					}
+
+					businessName := "ไม่ทราบชื่อร้าน"
+					if decl.Business != nil {
+						businessName = decl.Business.NameTH
+					}
+					matchedItems = append(matchedItems, domain.MatchedRecordDTO{
+						Ref1:         record.Ref1,
+						Ref2:         record.Ref2,
+						Amount:       record.Amount,
+						BusinessName: businessName,
+						TaxType:      decl.TaxType,
+						TaxMonth:     decl.TaxMonth,
+						TaxYear:      decl.TaxYear,
+						PaymentDate:  record.PaymentDate,
+					})
 				}
 			}
 		}
@@ -276,14 +344,15 @@ func (u *taxNewUseCase) UploadKTBFile(filename string, fileContent []byte, admin
 		MatchedRecords:   batch.MatchedCount,
 		UnmatchedRecords: batch.RecordCount - batch.MatchedCount,
 		TotalAmount:      batch.TotalAmount,
+		MatchedItems:     matchedItems,
 	}, nil
 }
 
 func (u *taxNewUseCase) sendPaymentSuccessEmail(decl *domain.TaxDeclaration) {
 	subject := fmt.Sprintf("ยืนยันการชำระเงินภาษี/ค่าธรรมเนียม อบจ. ชลบุรี - %s", decl.Business.NameTH)
-	
+
 	thaiMonth := getThaiMonthName(decl.TaxMonth)
-	thaiYear := decl.TaxYear + 543 // Buddhist Era
+	thaiYear := decl.TaxYear + 543
 
 	body := fmt.Sprintf(`
 	<html>
@@ -333,16 +402,16 @@ func (u *taxNewUseCase) sendPaymentSuccessEmail(decl *domain.TaxDeclaration) {
 			<p style="font-size: 12px; color: #999; text-align: center;">นี่เป็นอีเมลอัตโนมัติ กรุณาอย่าตอบกลับอีเมลฉบับนี้</p>
 		</div>
 	</body>
-	</html>`, 
-		decl.BusinessRegNumber, 
-		decl.Business.NameTH, 
-		getTaxTypeNameTH(decl.TaxType), 
-		thaiMonth, 
-		thaiYear, 
+	</html>`,
+		decl.BusinessRegNumber,
+		decl.Business.NameTH,
+		getTaxTypeNameTH(decl.TaxType),
+		thaiMonth,
+		thaiYear,
 		decl.DeclarationVersion,
-		formatWithCommas(decl.CalculatedTax), 
-		decl.PaidAt.Format("02/01/2006 15:04:05"), 
-		decl.Ref1, 
+		formatWithCommas(decl.CalculatedTax),
+		decl.PaidAt.Format("02/01/2006 15:04:05"),
+		decl.Ref1,
 		decl.Ref2,
 	)
 
@@ -353,7 +422,7 @@ func (u *taxNewUseCase) sendPaymentSuccessEmail(decl *domain.TaxDeclaration) {
 
 func (u *taxNewUseCase) UploadElaasFile(filename string, fileContent []byte, adminID uuid.UUID) (int, error) {
 	reader := csv.NewReader(bytes.NewReader(fileContent))
-	// Read header row
+
 	_, err := reader.Read()
 	if err != nil {
 		return 0, err
@@ -416,7 +485,7 @@ func (u *taxNewUseCase) UploadElaasFile(filename string, fileContent []byte, adm
 func (u *taxNewUseCase) GetDashboard(startDateStr, endDateStr string) (*domain.DashboardSummaryResponse, error) {
 	startDate, err := time.Parse("2006-01-02", startDateStr)
 	if err != nil {
-		// Default to start of current month
+
 		now := time.Now()
 		startDate = time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.Local)
 	}
@@ -431,8 +500,7 @@ func (u *taxNewUseCase) GetDashboard(startDateStr, endDateStr string) (*domain.D
 
 func (u *taxNewUseCase) ImportBusinesses(fileContent []byte) (*domain.ImportBusinessesResponse, error) {
 	reader := csv.NewReader(bytes.NewReader(fileContent))
-	
-	// Read header
+
 	_, err := reader.Read()
 	if err != nil {
 		return nil, err
@@ -461,29 +529,50 @@ func (u *taxNewUseCase) ImportBusinesses(fileContent []byte) (*domain.ImportBusi
 		taxType := record[3]
 
 		var ownerName, ownerID, contactPhone, contactEmail, address string
-		if len(record) > 4 { ownerName = record[4] }
-		if len(record) > 5 { ownerID = record[5] }
-		if len(record) > 6 { contactPhone = record[6] }
-		if len(record) > 7 { contactEmail = record[7] }
-		if len(record) > 8 { address = record[8] }
-
-		business := &domain.TaxBusiness{
-			ID:                  uuid.New(),
-			BusinessRegNumber:   regNum,
-			NameTH:              nameTH,
-			TaxType:             taxType,
-			CreatedAt:           time.Now(),
-			UpdatedAt:           time.Now(),
+		if len(record) > 4 {
+			ownerName = record[4]
+		}
+		if len(record) > 5 {
+			ownerID = record[5]
+		}
+		if len(record) > 6 {
+			contactPhone = record[6]
+		}
+		if len(record) > 7 {
+			contactEmail = record[7]
+		}
+		if len(record) > 8 {
+			address = record[8]
 		}
 
-		if nameEN != "" { business.NameEN = &nameEN }
-		if ownerName != "" { business.OwnerName = &ownerName }
-		if ownerID != "" { business.OwnerIdentityNumber = &ownerID }
-		if contactPhone != "" { business.ContactPhone = &contactPhone }
-		if contactEmail != "" { business.ContactEmail = &contactEmail }
-		if address != "" { business.AddressDetail = &address }
+		business := &domain.TaxBusiness{
+			ID:                uuid.New(),
+			BusinessRegNumber: regNum,
+			NameTH:            nameTH,
+			TaxType:           taxType,
+			CreatedAt:         time.Now(),
+			UpdatedAt:         time.Now(),
+		}
 
-		// Check if exists
+		if nameEN != "" {
+			business.NameEN = &nameEN
+		}
+		if ownerName != "" {
+			business.OwnerName = &ownerName
+		}
+		if ownerID != "" {
+			business.OwnerIdentityNumber = &ownerID
+		}
+		if contactPhone != "" {
+			business.ContactPhone = &contactPhone
+		}
+		if contactEmail != "" {
+			business.ContactEmail = &contactEmail
+		}
+		if address != "" {
+			business.AddressDetail = &address
+		}
+
 		existing, err := u.repo.GetBusinessByRegNumber(regNum)
 		if err == nil && existing != nil {
 			business.ID = existing.ID
@@ -516,21 +605,36 @@ func (u *taxNewUseCase) UpdateAuditStatus(id uuid.UUID, status string, notes str
 		return errors.New("declaration not found")
 	}
 
-	// Walk-in handling: if the declaration was pending and is now verified, it means a walk-in payment was made.
-	if decl.PaymentStatus == "pending" && status == "verified" {
-		now := time.Now()
-		decl.PaidAt = &now
-		decl.PaidAmount = &decl.CalculatedTax
-	}
-
 	decl.PaymentStatus = status
 	decl.AuditedBy = &adminID
 	decl.AuditNotes = &notes
 	decl.UpdatedAt = time.Now()
-	
+
 	err = u.repo.UpdateDeclaration(decl)
 	if err != nil {
 		return err
+	}
+
+	var userInfo domain.UserInformation
+	if dbErr := database.DB.Where("phone = ? OR email = ?", decl.PayerPhone, decl.PayerEmail).First(&userInfo).Error; dbErr == nil {
+		title := "ผลการตรวจสอบการยื่นภาษีสำเร็จ"
+		body := fmt.Sprintf("แบบภาษี %s รอบ %s %d ของท่าน ได้รับการตรวจสอบสถานะ: ผ่านการอนุมัติเรียบร้อย",
+			getTaxTypeNameTH(decl.TaxType), getThaiMonthName(decl.TaxMonth), decl.TaxYear+543)
+
+		if status == "audit_failed" {
+			title = "การยื่นภาษีตรวจสอบไม่ผ่าน"
+			body = fmt.Sprintf("แบบภาษี %s รอบ %s %d ไม่ผ่านการตรวจสอบเนื่องจาก: %s โปรดยื่นแบบเพิ่มเติม",
+				getTaxTypeNameTH(decl.TaxType), getThaiMonthName(decl.TaxMonth), decl.TaxYear+543, notes)
+		}
+
+		SendNotificationToUser(
+			userInfo.UserId,
+			title,
+			body,
+			decl.ID.String(),
+			status,
+			"tax",
+		)
 	}
 
 	if status == "audit_failed" {
@@ -542,9 +646,9 @@ func (u *taxNewUseCase) UpdateAuditStatus(id uuid.UUID, status string, notes str
 
 func (u *taxNewUseCase) sendAuditFailedEmail(decl *domain.TaxDeclaration, notes string) {
 	subject := fmt.Sprintf("แจ้งผลการตรวจสอบการยื่นแบบภาษี/ค่าธรรมเนียม (ตรวจสอบไม่ผ่าน) - %s", decl.Business.NameTH)
-	
+
 	thaiMonth := getThaiMonthName(decl.TaxMonth)
-	thaiYear := decl.TaxYear + 543 // Buddhist Era
+	thaiYear := decl.TaxYear + 543
 
 	body := fmt.Sprintf(`
 	<html>
@@ -587,12 +691,12 @@ func (u *taxNewUseCase) sendAuditFailedEmail(decl *domain.TaxDeclaration, notes 
 			<p style="font-size: 12px; color: #999; text-align: center;">นี่เป็นอีเมลอัตโนมัติ กรุณาอย่าตอบกลับอีเมลฉบับนี้</p>
 		</div>
 	</body>
-	</html>`, 
-		decl.BusinessRegNumber, 
-		decl.Business.NameTH, 
-		getTaxTypeNameTH(decl.TaxType), 
-		thaiMonth, 
-		thaiYear, 
+	</html>`,
+		decl.BusinessRegNumber,
+		decl.Business.NameTH,
+		getTaxTypeNameTH(decl.TaxType),
+		thaiMonth,
+		thaiYear,
 		decl.DeclarationVersion,
 		notes,
 	)
@@ -602,7 +706,6 @@ func (u *taxNewUseCase) sendAuditFailedEmail(decl *domain.TaxDeclaration, notes 
 	}
 }
 
-// Helpers
 func getThaiMonthName(m int) string {
 	months := []string{"", "มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน", "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"}
 	if m >= 1 && m <= 12 {
@@ -640,14 +743,25 @@ func formatWithCommas(val float64) string {
 	return strings.Join(result, "") + "." + decPart
 }
 
-func (u *taxNewUseCase) ListDeclarations(taxType, status, search string, limit, offset int) ([]domain.TaxDeclaration, int64, error) {
+func (u *taxNewUseCase) ListDeclarations(taxType, status, search, startDateStr, endDateStr string, limit, offset int) ([]domain.TaxDeclaration, int64, error) {
 	if limit <= 0 {
 		limit = 50
 	}
 	if offset < 0 {
 		offset = 0
 	}
-	return u.repo.ListDeclarations(taxType, status, search, limit, offset)
+
+	var startDate, endDate *time.Time
+	if startDateStr != "" {
+		if t, err := time.Parse("2006-01-02", startDateStr); err == nil {
+			startDate = &t
+		}
+	}
+	if endDateStr != "" {
+		if t, err := time.Parse("2006-01-02", endDateStr); err == nil {
+			endDate = &t
+		}
+	}
+
+	return u.repo.ListDeclarations(taxType, status, search, startDate, endDate, limit, offset)
 }
-
-

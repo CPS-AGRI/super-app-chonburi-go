@@ -11,7 +11,6 @@ import (
 	"github.com/stretchr/testify/mock"
 )
 
-// MockEmailSender is a mock email sender
 type MockEmailSender struct {
 	mock.Mock
 }
@@ -21,7 +20,6 @@ func (m *MockEmailSender) SendHTML(to []string, subject, body string) error {
 	return args.Error(0)
 }
 
-// MockTaxNewRepository is a mock repository implementation
 type MockTaxNewRepository struct {
 	mock.Mock
 }
@@ -65,8 +63,8 @@ func (m *MockTaxNewRepository) UpdateDeclaration(declaration *domain.TaxDeclarat
 	return args.Error(0)
 }
 
-func (m *MockTaxNewRepository) ListDeclarations(taxType, status, search string, limit, offset int) ([]domain.TaxDeclaration, int64, error) {
-	args := m.Called(taxType, status, search, limit, offset)
+func (m *MockTaxNewRepository) ListDeclarations(taxType, status, search string, startDate, endDate *time.Time, limit, offset int) ([]domain.TaxDeclaration, int64, error) {
+	args := m.Called(taxType, status, search, startDate, endDate, limit, offset)
 	return args.Get(0).([]domain.TaxDeclaration), int64(args.Int(1)), args.Error(2)
 }
 
@@ -111,6 +109,14 @@ func (m *MockTaxNewRepository) UpsertBusiness(business *domain.TaxBusiness) erro
 	return args.Error(0)
 }
 
+func (m *MockTaxNewRepository) GetUserInformationByPhoneOrEmail(phone *string, email string) (*domain.UserInformation, error) {
+	args := m.Called(phone, email)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*domain.UserInformation), args.Error(1)
+}
+
 func TestUploadKTBFile(t *testing.T) {
 	repo := new(MockTaxNewRepository)
 	mailSender := new(MockEmailSender)
@@ -118,12 +124,7 @@ func TestUploadKTBFile(t *testing.T) {
 
 	adminID := uuid.New()
 	filename := "ktb_reconciliation_sample.txt"
-	
-	// Sample content similar to what we observed:
-	// Line 1: Header (record type 01)
-	// Line 2: Detail record (record type 02), match with ref1=123456701, ref2=20260500, amount=750.00
-	// Line 3: Detail record (record type 02), mismatch or match with ref1=765432102, ref2=20260200, amount=4086.00
-	// Line 4: Footer (record type 09)
+
 	fileContent := []byte(`010205561001234  CHONBURI PAO                            202605220062286032092                                          
 0220260522083015123456701           20260500            0000000075000                                                   
 0220260522091530765432102           20260200            0000000408600                                                   
@@ -152,11 +153,9 @@ func TestUploadKTBFile(t *testing.T) {
 		Business:           mockBusiness,
 	}
 
-	// Set expectations
-	// First line is detail record for ref1: 123456701, ref2: 20260500, amount: 750.00
 	repo.On("GetDeclarationByRefs", "123456701", "20260500").Return(mockDecl1, nil)
-	// Second line is detail record for ref1: 765432102, ref2: 20260200, amount: 4086.00 (fails match or not found)
 	repo.On("GetDeclarationByRefs", "765432102", "20260200").Return(nil, errors.New("not found"))
+	repo.On("GetUserInformationByPhoneOrEmail", mock.Anything, mock.Anything).Return(nil, nil)
 
 	repo.On("CreateReconciliationBatch", mock.Anything).Return(nil)
 	repo.On("CreateReconciliationRecord", mock.Anything).Return(nil)
@@ -172,6 +171,88 @@ func TestUploadKTBFile(t *testing.T) {
 	assert.Equal(t, 1, resp.MatchedRecords)
 	assert.Equal(t, 1, resp.UnmatchedRecords)
 	assert.Equal(t, 4836.00, resp.TotalAmount)
+
+	repo.AssertExpectations(t)
+	mailSender.AssertExpectations(t)
+}
+
+func TestUploadKTBFileSmartFallback(t *testing.T) {
+	repo := new(MockTaxNewRepository)
+	mailSender := new(MockEmailSender)
+	uc := NewTaxNewUseCase(repo, mailSender, "099400016485800")
+
+	adminID := uuid.New()
+	filename := "ktb_combined_test_reconciliation.txt"
+
+	fileContent := []byte(`010205561001234 CHONBURI PAO 202605280062286032092
+0220260528120928123456701 20260501 0000000030000
+0220260528121034765432102 20260501 0000000227000
+090000020000000257000
+`)
+
+	mockBusiness1 := &domain.TaxBusiness{
+		ID:                uuid.New(),
+		BusinessRegNumber: "1234567",
+		NameTH:            "ร้านค้าโรงแรมทดสอบ",
+		TaxType:           "hotel_fee",
+	}
+
+	mockDecl1 := &domain.TaxDeclaration{
+		ID:                 uuid.New(),
+		BusinessID:         mockBusiness1.ID,
+		BusinessRegNumber:  "1234567",
+		TaxType:            "hotel_fee",
+		TaxMonth:           5,
+		TaxYear:            2026,
+		DeclarationVersion: 1,
+		CalculatedTax:      300.00,
+		PayerEmail:         "hotel@example.com",
+		Ref1:               "123456701",
+		Ref2:               "20260501",
+		Business:           mockBusiness1,
+	}
+
+	mockBusiness2 := &domain.TaxBusiness{
+		ID:                uuid.New(),
+		BusinessRegNumber: "7654321",
+		NameTH:            "ร้านค้าปั๊มน้ำมันทดสอบ",
+		TaxType:           "oil_gas_tax",
+	}
+
+	mockDecl2 := &domain.TaxDeclaration{
+		ID:                 uuid.New(),
+		BusinessID:         mockBusiness2.ID,
+		BusinessRegNumber:  "7654321",
+		TaxType:            "oil_gas_tax",
+		TaxMonth:           5,
+		TaxYear:            2026,
+		DeclarationVersion: 1,
+		CalculatedTax:      2270.00,
+		PayerEmail:         "oil@example.com",
+		Ref1:               "765432102",
+		Ref2:               "20260501",
+		Business:           mockBusiness2,
+	}
+
+	repo.On("GetDeclarationByRefs", "123456701", "20260501").Return(mockDecl1, nil)
+	repo.On("GetDeclarationByRefs", "765432102", "20260501").Return(mockDecl2, nil)
+	repo.On("GetUserInformationByPhoneOrEmail", mock.Anything, mock.Anything).Return(nil, nil)
+
+	repo.On("CreateReconciliationBatch", mock.Anything).Return(nil)
+	repo.On("CreateReconciliationRecord", mock.Anything).Return(nil)
+	repo.On("UpdateDeclaration", mock.Anything).Return(nil)
+
+	mailSender.On("SendHTML", []string{"hotel@example.com"}, mock.Anything, mock.Anything).Return(nil)
+	mailSender.On("SendHTML", []string{"oil@example.com"}, mock.Anything, mock.Anything).Return(nil)
+
+	resp, err := uc.UploadKTBFile(filename, fileContent, adminID)
+	assert.NoError(t, err)
+	assert.NotNil(t, resp)
+
+	assert.Equal(t, 2, resp.TotalRecords)
+	assert.Equal(t, 2, resp.MatchedRecords)
+	assert.Equal(t, 0, resp.UnmatchedRecords)
+	assert.Equal(t, 2570.00, resp.TotalAmount)
 
 	repo.AssertExpectations(t)
 	mailSender.AssertExpectations(t)

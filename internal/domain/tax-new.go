@@ -6,13 +6,12 @@ import (
 	"github.com/google/uuid"
 )
 
-// TaxRate represents tax_rates table
 type TaxRate struct {
 	ID        uuid.UUID `gorm:"type:uuid;primaryKey;column:id;default:uuid_generate_v4()" json:"id"`
-	TaxType   string    `gorm:"type:varchar(50);not null;unique;column:tax_type" json:"tax_type"` // 'hotel_fee', 'oil_gas_tax', 'tobacco_tax'
+	TaxType   string    `gorm:"type:varchar(50);not null;unique;column:tax_type" json:"tax_type"`
 	NameTH    string    `gorm:"type:varchar(100);not null;column:name_th" json:"name_th"`
 	RateValue float64   `gorm:"type:numeric(10,4);not null;column:rate_value" json:"rate_value"`
-	RateUnit  string    `gorm:"type:varchar(20);not null;column:rate_unit" json:"rate_unit"`      // 'percentage', 'per_litre', 'per_pack'
+	RateUnit  string    `gorm:"type:varchar(20);not null;column:rate_unit" json:"rate_unit"`
 	IsActive  bool      `gorm:"type:boolean;not null;default:true;column:is_active" json:"is_active"`
 	CreatedAt time.Time `gorm:"type:timestamptz;not null;default:now();column:created_at" json:"created_at"`
 	UpdatedAt time.Time `gorm:"type:timestamptz;not null;default:now();column:updated_at" json:"updated_at"`
@@ -22,7 +21,6 @@ func (TaxRate) TableName() string {
 	return "tax_rates"
 }
 
-// TaxBusiness represents tax_businesses table
 type TaxBusiness struct {
 	ID                  uuid.UUID `gorm:"type:uuid;primaryKey;column:id;default:uuid_generate_v4()" json:"id"`
 	BusinessRegNumber   string    `gorm:"type:varchar(20);not null;unique;index;column:business_reg_number" json:"business_reg_number"`
@@ -42,34 +40,32 @@ func (TaxBusiness) TableName() string {
 	return "tax_businesses"
 }
 
-// TaxDeclaration represents tax_declarations table
 type TaxDeclaration struct {
-	ID                         uuid.UUID  `gorm:"type:uuid;primaryKey;column:id;default:uuid_generate_v4()" json:"id"`
-	BusinessID                 uuid.UUID  `gorm:"type:uuid;not null;column:business_id" json:"business_id"`
-	BusinessRegNumber          string     `gorm:"type:varchar(20);not null;uniqueIndex:idx_tax_period;column:business_reg_number" json:"business_reg_number"`
-	TaxType                    string     `gorm:"type:varchar(50);not null;uniqueIndex:idx_tax_period;column:tax_type" json:"tax_type"`
-	TaxMonth                   int        `gorm:"type:integer;not null;uniqueIndex:idx_tax_period;column:tax_month" json:"tax_month"`
-	TaxYear                    int        `gorm:"type:integer;not null;uniqueIndex:idx_tax_period;column:tax_year" json:"tax_year"`
-	DeclarationVersion         int        `gorm:"type:integer;not null;default:1;uniqueIndex:idx_tax_period;column:declaration_version" json:"declaration_version"`
-	MonthlyRevenue             float64    `gorm:"type:numeric(15,2);not null;column:monthly_revenue" json:"monthly_revenue"`
-	VolumeUnits                float64    `gorm:"type:numeric(15,4);default:0.0;column:volume_units" json:"volume_units"`
-	CalculatedTax              float64    `gorm:"type:numeric(12,2);not null;column:calculated_tax" json:"calculated_tax"`
-	FormFileURL                string     `gorm:"type:varchar(512);not null;column:form_file_url" json:"form_file_url"`
-	PayerEmail                 string     `gorm:"type:varchar(255);not null;column:payer_email" json:"payer_email"`
-	PayerPhone                 *string    `gorm:"type:varchar(50);column:payer_phone" json:"payer_phone,omitempty"`
-	Ref1                       string     `gorm:"type:varchar(20);not null;index;column:ref1" json:"ref1"`
-	Ref2                       string     `gorm:"type:varchar(20);not null;index;column:ref2" json:"ref2"`
-	QRCodeContent              *string    `gorm:"type:text;column:qr_code_content" json:"qr_code_content,omitempty"`
-	PaymentStatus              string     `gorm:"type:varchar(30);not null;default:'pending';index;column:payment_status" json:"payment_status"` // 'pending', 'paid', 'verified', 'audit_failed'
-	PaidAmount                 *float64   `gorm:"type:numeric(12,2);column:paid_amount" json:"paid_amount,omitempty"`
-	PaidAt                     *time.Time `gorm:"type:timestamptz;column:paid_at" json:"paid_at,omitempty"`
+	ID                        uuid.UUID  `gorm:"type:uuid;primaryKey;column:id;default:uuid_generate_v4()" json:"id"`
+	BusinessID                uuid.UUID  `gorm:"type:uuid;not null;column:business_id" json:"business_id"`
+	BusinessRegNumber         string     `gorm:"type:varchar(20);not null;uniqueIndex:idx_tax_period;column:business_reg_number" json:"business_reg_number"`
+	TaxType                   string     `gorm:"type:varchar(50);not null;uniqueIndex:idx_tax_period;column:tax_type" json:"tax_type"`
+	TaxMonth                  int        `gorm:"type:integer;not null;uniqueIndex:idx_tax_period;column:tax_month" json:"tax_month"`
+	TaxYear                   int        `gorm:"type:integer;not null;uniqueIndex:idx_tax_period;column:tax_year" json:"tax_year"`
+	DeclarationVersion        int        `gorm:"type:integer;not null;default:1;uniqueIndex:idx_tax_period;column:declaration_version" json:"declaration_version"`
+	MonthlyRevenue            float64    `gorm:"type:numeric(15,2);not null;column:monthly_revenue" json:"monthly_revenue"`
+	VolumeUnits               float64    `gorm:"type:numeric(15,4);default:0.0;column:volume_units" json:"volume_units"`
+	CalculatedTax             float64    `gorm:"type:numeric(12,2);not null;column:calculated_tax" json:"calculated_tax"`
+	FormFileURL               string     `gorm:"type:varchar(512);not null;column:form_file_url" json:"form_file_url"`
+	PayerEmail                string     `gorm:"type:varchar(255);not null;column:payer_email" json:"payer_email"`
+	PayerPhone                *string    `gorm:"type:varchar(50);column:payer_phone" json:"payer_phone,omitempty"`
+	Ref1                      string     `gorm:"type:varchar(20);not null;index;column:ref1" json:"ref1"`
+	Ref2                      string     `gorm:"type:varchar(20);not null;index;column:ref2" json:"ref2"`
+	QRCodeContent             *string    `gorm:"type:text;column:qr_code_content" json:"qr_code_content,omitempty"`
+	PaymentStatus             string     `gorm:"type:varchar(30);not null;default:'pending';index;column:payment_status" json:"payment_status"`
+	PaidAmount                *float64   `gorm:"type:numeric(12,2);column:paid_amount" json:"paid_amount,omitempty"`
+	PaidAt                    *time.Time `gorm:"type:timestamptz;column:paid_at" json:"paid_at,omitempty"`
 	KTBReconciliationRecordID *uuid.UUID `gorm:"type:uuid;column:ktb_reconciliation_record_id" json:"ktb_reconciliation_record_id,omitempty"`
-	AuditedBy                  *uuid.UUID `gorm:"type:uuid;column:audited_by" json:"audited_by,omitempty"`
-	AuditNotes                 *string    `gorm:"type:text;column:audit_notes" json:"audit_notes,omitempty"`
-	CreatedAt                  time.Time  `gorm:"type:timestamptz;not null;default:now();column:created_at" json:"created_at"`
-	UpdatedAt                  time.Time  `gorm:"type:timestamptz;not null;default:now();column:updated_at" json:"updated_at"`
+	AuditedBy                 *uuid.UUID `gorm:"type:uuid;column:audited_by" json:"audited_by,omitempty"`
+	AuditNotes                *string    `gorm:"type:text;column:audit_notes" json:"audit_notes,omitempty"`
+	CreatedAt                 time.Time  `gorm:"type:timestamptz;not null;default:now();column:created_at" json:"created_at"`
+	UpdatedAt                 time.Time  `gorm:"type:timestamptz;not null;default:now();column:updated_at" json:"updated_at"`
 
-	// Relations
 	Business *TaxBusiness `gorm:"foreignKey:BusinessID" json:"business,omitempty"`
 }
 
@@ -77,7 +73,6 @@ func (TaxDeclaration) TableName() string {
 	return "tax_declarations"
 }
 
-// BankReconciliationBatch represents bank_reconciliation_batches table
 type BankReconciliationBatch struct {
 	ID           uuid.UUID `gorm:"type:uuid;primaryKey;column:id;default:uuid_generate_v4()" json:"id"`
 	Filename     string    `gorm:"type:varchar(255);not null;column:filename" json:"filename"`
@@ -92,7 +87,6 @@ func (BankReconciliationBatch) TableName() string {
 	return "bank_reconciliation_batches"
 }
 
-// BankReconciliationRecord represents bank_reconciliation_records table
 type BankReconciliationRecord struct {
 	ID          uuid.UUID `gorm:"type:uuid;primaryKey;column:id;default:uuid_generate_v4()" json:"id"`
 	BatchID     uuid.UUID `gorm:"type:uuid;not null;column:batch_id" json:"batch_id"`
@@ -109,7 +103,6 @@ func (BankReconciliationRecord) TableName() string {
 	return "bank_reconciliation_records"
 }
 
-// ElaasDailySummary represents elaas_daily_summaries table
 type ElaasDailySummary struct {
 	ID               uuid.UUID `gorm:"type:uuid;primaryKey;column:id;default:uuid_generate_v4()" json:"id"`
 	SummaryDate      time.Time `gorm:"type:date;not null;uniqueIndex:unique_elaas_summary;column:summary_date" json:"summary_date"`
@@ -125,7 +118,6 @@ func (ElaasDailySummary) TableName() string {
 	return "elaas_daily_summaries"
 }
 
-// DTOs
 type DeclareTaxRequest struct {
 	BusinessRegNumber string  `json:"business_reg_number" validate:"required"`
 	TaxMonth          int     `json:"tax_month" validate:"required,min=1,max=12"`
@@ -155,10 +147,10 @@ type TaxBusinessDTO struct {
 }
 
 type DashboardSummaryResponse struct {
-	TotalRevenue      float64                           `json:"total_revenue"`
-	TotalTransactions int                               `json:"total_transactions"`
-	Breakdown         map[string]TaxCategorySummary     `json:"breakdown"`
-	DailyTrends       []DailyTrendItem                  `json:"daily_trends"`
+	TotalRevenue      float64                       `json:"total_revenue"`
+	TotalTransactions int                           `json:"total_transactions"`
+	Breakdown         map[string]TaxCategorySummary `json:"breakdown"`
+	DailyTrends       []DailyTrendItem              `json:"daily_trends"`
 }
 
 type TaxCategorySummary struct {
@@ -167,9 +159,9 @@ type TaxCategorySummary struct {
 }
 
 type DailyTrendItem struct {
-	Date      string  `json:"date"`
-	HotelFee  float64 `json:"hotel_fee"`
-	OilGasTax float64 `json:"oil_gas_tax"`
+	Date       string  `json:"date"`
+	HotelFee   float64 `json:"hotel_fee"`
+	OilGasTax  float64 `json:"oil_gas_tax"`
 	TobaccoTax float64 `json:"tobacco_tax"`
 }
 
@@ -179,16 +171,27 @@ type ImportBusinessesResponse struct {
 	Failed   int `json:"failed"`
 }
 
-type KTBReconciliationResponse struct {
-	BatchID          uuid.UUID `json:"batch_id"`
-	Filename         string    `json:"filename"`
-	TotalRecords     int       `json:"total_records"`
-	MatchedRecords   int       `json:"matched_records"`
-	UnmatchedRecords int       `json:"unmatched_records"`
-	TotalAmount      float64   `json:"total_amount"`
+type MatchedRecordDTO struct {
+	Ref1         string    `json:"ref1"`
+	Ref2         string    `json:"ref2"`
+	Amount       float64   `json:"amount"`
+	BusinessName string    `json:"business_name"`
+	TaxType      string    `json:"tax_type"`
+	TaxMonth     int       `json:"tax_month"`
+	TaxYear      int       `json:"tax_year"`
+	PaymentDate  time.Time `json:"payment_date"`
 }
 
-// TaxNewRepository defines CRUD operations for the new tax module
+type KTBReconciliationResponse struct {
+	BatchID          uuid.UUID          `json:"batch_id"`
+	Filename         string             `json:"filename"`
+	TotalRecords     int                `json:"total_records"`
+	MatchedRecords   int                `json:"matched_records"`
+	UnmatchedRecords int                `json:"unmatched_records"`
+	TotalAmount      float64            `json:"total_amount"`
+	MatchedItems     []MatchedRecordDTO `json:"matched_items"`
+}
+
 type TaxNewRepository interface {
 	GetBusinessByRegNumber(regNumber string) (*TaxBusiness, error)
 	GetActiveTaxRate(taxType string) (*TaxRate, error)
@@ -196,36 +199,30 @@ type TaxNewRepository interface {
 	CreateDeclaration(declaration *TaxDeclaration) error
 	GetDeclarationByID(id uuid.UUID) (*TaxDeclaration, error)
 	UpdateDeclaration(declaration *TaxDeclaration) error
-	ListDeclarations(taxType, status, search string, limit, offset int) ([]TaxDeclaration, int64, error)
+	ListDeclarations(taxType, status, search string, startDate, endDate *time.Time, limit, offset int) ([]TaxDeclaration, int64, error)
 
-	// Reconciliation Batches & Records
 	CreateReconciliationBatch(batch *BankReconciliationBatch) error
 	CreateReconciliationRecord(record *BankReconciliationRecord) error
 	GetDeclarationByRefs(ref1, ref2 string) (*TaxDeclaration, error)
 	GetUnmatchedReconciliationRecords() ([]BankReconciliationRecord, error)
 
-	// e-LAAS summaries
 	UpsertElaasSummary(summary *ElaasDailySummary) error
 
-	// Admin Dashboard
 	GetDashboardSummary(startDate, endDate time.Time) (*DashboardSummaryResponse, error)
 
-	// Business Import
 	UpsertBusiness(business *TaxBusiness) error
+	GetUserInformationByPhoneOrEmail(phone *string, email string) (*UserInformation, error)
 }
 
-// TaxNewUseCase defines business logic for the new tax module
 type TaxNewUseCase interface {
 	GetBusiness(regNumber string) (*TaxBusinessDTO, error)
 	DeclareTax(req DeclareTaxRequest) (*DeclareTaxResponse, error)
 	GetDeclaration(id uuid.UUID) (*TaxDeclaration, error)
-	
-	// Admin Usecases
+
 	UploadKTBFile(filename string, fileContent []byte, adminID uuid.UUID) (*KTBReconciliationResponse, error)
 	UploadElaasFile(filename string, fileContent []byte, adminID uuid.UUID) (int, error)
 	GetDashboard(startDateStr, endDateStr string) (*DashboardSummaryResponse, error)
 	ImportBusinesses(fileContent []byte) (*ImportBusinessesResponse, error)
 	UpdateAuditStatus(id uuid.UUID, status string, notes string, adminID uuid.UUID) error
-	ListDeclarations(taxType, status, search string, limit, offset int) ([]TaxDeclaration, int64, error)
+	ListDeclarations(taxType, status, search, startDateStr, endDateStr string, limit, offset int) ([]TaxDeclaration, int64, error)
 }
-

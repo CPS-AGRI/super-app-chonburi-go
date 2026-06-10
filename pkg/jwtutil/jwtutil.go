@@ -28,18 +28,16 @@ func secretKey() []byte {
 }
 
 func GenerateToken(user domain.User) (string, error) {
-	// Try to get Name if user is domain.Admin
+
 	name := ""
 	permissions := []string{}
 	if admin, ok := user.(*domain.Admin); ok {
 		name = admin.Name + " " + admin.LastName
 
-		// 1. If superadmin, add system permissions
 		if admin.Role != nil && (admin.Role.Type == "superadmin" || admin.Role.Type == "super_admin") {
 			permissions = append(permissions, "MANAGE_CITY", "MANAGE_ADMINS", "MANAGE_DEPARTMENTS", "VIEW_ALL_REPORTS")
 		}
 
-		// 2. Add permissions from assigned modules
 		uniqueKeys := make(map[string]bool)
 		for _, dept := range admin.Departments {
 			for _, module := range dept.Modules {
@@ -47,10 +45,9 @@ func GenerateToken(user domain.User) (string, error) {
 					uniqueKeys[*module.Key] = true
 				}
 
-				// Explicitly grant ModuleComplaintCenter if this is the Center module
-				if module.ID == "d01b2ce5-34a9-498b-bba0-b1b8360f1ea9" || 
-				   module.NameTh == "ศูนย์ร้องทุกข์" || 
-				   module.NameEn == "Complaint Center" {
+				if module.ID == "d01b2ce5-34a9-498b-bba0-b1b8360f1ea9" ||
+					module.NameTh == "ศูนย์ร้องทุกข์" ||
+					module.NameEn == "Complaint Center" {
 					uniqueKeys["ModuleComplaintCenter"] = true
 				}
 			}

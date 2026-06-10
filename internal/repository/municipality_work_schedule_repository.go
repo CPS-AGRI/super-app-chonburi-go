@@ -39,6 +39,6 @@ func (r *municipalityWorkScheduleRepository) Update(schedule *domain.Municipalit
 }
 
 func (r *municipalityWorkScheduleRepository) Delete(id uuid.UUID) error {
-	// Soft delete by updating status
+
 	return r.db.Model(&domain.MunicipalityWorkSchedule{}).Where("id = ?", id).Update("status", "inactive").Error
 }

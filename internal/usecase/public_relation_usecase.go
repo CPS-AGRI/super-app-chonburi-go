@@ -41,7 +41,7 @@ func (u *publicRelationUseCase) uploadBase64Image(base64Str string) (string, err
 		return base64Str, nil
 	}
 
-	metaPart := parts[0] // e.g. "data:image/png"
+	metaPart := parts[0]
 	dataPart := parts[1]
 
 	var extension string
@@ -54,7 +54,7 @@ func (u *publicRelationUseCase) uploadBase64Image(base64Str string) (string, err
 	} else if strings.Contains(metaPart, "image/gif") {
 		extension = ".gif"
 	} else {
-		extension = ".jpg" // fallback
+		extension = ".jpg"
 	}
 
 	data, err := base64.StdEncoding.DecodeString(dataPart)
@@ -73,7 +73,6 @@ func (u *publicRelationUseCase) uploadBase64Image(base64Str string) (string, err
 	return url, nil
 }
 
-// Dashboard
 func (u *publicRelationUseCase) GetDashboardStats(moduleId string) (*domain.PublicRelationDashboardStats, error) {
 	return u.repo.GetDashboardStats(moduleId)
 }
@@ -92,7 +91,6 @@ func (u *publicRelationUseCase) GetExpiringNews(moduleId string, limit int) ([]d
 	return u.repo.GetExpiringNews(moduleId, limit)
 }
 
-// News
 func (u *publicRelationUseCase) GetPaginated(moduleId string, query domain.PublicRelationQuery) (*domain.PaginatedPublicRelationResponse, error) {
 	if query.PageNumber < 1 {
 		query.PageNumber = 1
@@ -120,7 +118,6 @@ func (u *publicRelationUseCase) Create(pr *domain.PublicRelation, adminID string
 	pr.CreatedBy = admin.Name + " " + admin.LastName
 	pr.UpdatedBy = admin.Name + " " + admin.LastName
 
-	// Sequence images & auto-upload base64 to MinIO
 	for i := range pr.Images {
 		if strings.HasPrefix(pr.Images[i].Url, "data:") {
 			minioUrl, err := u.uploadBase64Image(pr.Images[i].Url)
@@ -165,7 +162,6 @@ func (u *publicRelationUseCase) Update(pr *domain.PublicRelation, adminID string
 	existing.UpdatedDate = time.Now()
 	existing.UpdatedBy = admin.Name + " " + admin.LastName
 
-	// Sequence new images & auto-upload base64 to MinIO
 	existing.Images = pr.Images
 	for i := range existing.Images {
 		if strings.HasPrefix(existing.Images[i].Url, "data:") {
@@ -198,7 +194,6 @@ func (u *publicRelationUseCase) ShowComment(moduleId string, prId string, commen
 	return u.repo.ShowComment(moduleId, prId, commentId)
 }
 
-// Notifications
 func (u *publicRelationUseCase) GetPaginatedNotifications(moduleId string, query domain.PublicRelationNotificationQuery, history bool) (*domain.PaginatedNotificationResponse, error) {
 	if query.PageNumber < 1 {
 		query.PageNumber = 1
@@ -259,7 +254,6 @@ func (u *publicRelationUseCase) DeleteNotification(moduleId string, id string, a
 	return u.repo.DeleteNotification(moduleId, id)
 }
 
-// Welcome Screen
 func (u *publicRelationUseCase) GetWelcomeScreens() ([]domain.MunicipalityWelcomeScreen, error) {
 	return u.repo.GetWelcomeScreens()
 }
@@ -270,7 +264,6 @@ func (u *publicRelationUseCase) UploadWelcomeScreen(screen *domain.MunicipalityW
 		return err
 	}
 
-	// Auto-upload base64 to MinIO if present
 	if strings.HasPrefix(screen.ImageUrl, "data:") {
 		minioUrl, err := u.uploadBase64Image(screen.ImageUrl)
 		if err == nil {
@@ -278,7 +271,6 @@ func (u *publicRelationUseCase) UploadWelcomeScreen(screen *domain.MunicipalityW
 		}
 	}
 
-	// Deactivate other welcome screens if this one is set to active
 	if screen.IsActive {
 		existing, err := u.repo.GetWelcomeScreens()
 		if err == nil {

@@ -2,6 +2,7 @@ package repository
 
 import (
 	"super-app-chonburi-go/internal/domain"
+
 	"gorm.io/gorm"
 )
 
@@ -30,12 +31,11 @@ func (r *moduleRepository) GetByDepartmentID(deptID string) ([]domain.Module, er
 
 func (r *moduleRepository) AssignToDepartment(deptID string, moduleIDs []string) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
-		// Remove existing assignments
+
 		if err := tx.Where("department_id = ?", deptID).Delete(&domain.DepartmentModule{}).Error; err != nil {
 			return err
 		}
 
-		// Add new assignments
 		for _, mID := range moduleIDs {
 			assignment := domain.DepartmentModule{
 				DepartmentId: deptID,
