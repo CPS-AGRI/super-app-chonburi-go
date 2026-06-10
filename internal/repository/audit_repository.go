@@ -2,6 +2,7 @@ package repository
 
 import (
 	"super-app-chonburi-go/internal/domain"
+
 	"gorm.io/gorm"
 )
 

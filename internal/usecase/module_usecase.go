@@ -23,7 +23,6 @@ func (u *moduleUseCase) GetModulesForUser(adminID string) ([]domain.Module, erro
 		return nil, err
 	}
 
-	// If SuperAdmin, return all modules
 	if admin.Role != nil && admin.Role.Type == "super_admin" {
 		return u.repo.GetAll()
 	}

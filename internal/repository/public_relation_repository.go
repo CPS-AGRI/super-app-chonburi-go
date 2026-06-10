@@ -16,17 +16,14 @@ func NewPublicRelationRepository(db *gorm.DB) domain.PublicRelationRepository {
 	return &publicRelationRepository{db: db}
 }
 
-// Dashboard
 func (r *publicRelationRepository) GetDashboardStats(moduleId string) (*domain.PublicRelationDashboardStats, error) {
 	var stats domain.PublicRelationDashboardStats
 	now := time.Now()
 
-	// 1. Active News Count
 	r.db.Model(&domain.PublicRelation{}).
 		Where("module_id = ? AND status = ? AND start_date <= ? AND end_date >= ?", moduleId, "Published", now, now).
 		Count(&stats.ActiveNewsCount)
 
-	// 2. Average Viewers
 	type AvgResult struct {
 		Avg float64
 	}
@@ -38,27 +35,22 @@ func (r *publicRelationRepository) GetDashboardStats(moduleId string) (*domain.P
 		WHERE pr.module_id = ?`, moduleId).Scan(&avgResult)
 	stats.AverageViewers = int64(avgResult.Avg)
 
-	// 3. Total News
 	r.db.Model(&domain.PublicRelation{}).Where("module_id = ?", moduleId).Count(&stats.TotalNewsCount)
 
-	// 4. Total Notifications
 	r.db.Model(&domain.PublicRelationNotification{}).Where("module_id = ?", moduleId).Count(&stats.TotalNotificationCount)
 
-	// 5. Total Likes
 	r.db.Raw(`
 		SELECT COUNT(*) 
 		FROM module_public_relation_likes l
 		JOIN module_public_relations pr ON pr.id = l.module_public_relation_id
 		WHERE pr.module_id = ?`, moduleId).Scan(&stats.TotalLikesCount)
 
-	// 6. Total Comments
 	r.db.Raw(`
 		SELECT COUNT(*) 
 		FROM module_public_relation_comments c
 		JOIN module_public_relations pr ON pr.id = c.module_public_relation_id
 		WHERE pr.module_id = ?`, moduleId).Scan(&stats.TotalCommentsCount)
 
-	// 7. Reported Comments (Status = 'reported')
 	r.db.Raw(`
 		SELECT COUNT(*) 
 		FROM module_public_relation_comments c
@@ -89,7 +81,6 @@ func (r *publicRelationRepository) GetExpiringNews(moduleId string, limit int) (
 	return prs, err
 }
 
-// News
 func (r *publicRelationRepository) GetPaginated(moduleId string, query domain.PublicRelationQuery) (*domain.PaginatedPublicRelationResponse, error) {
 	var items []domain.PublicRelation
 	var total int64
@@ -154,7 +145,7 @@ func (r *publicRelationRepository) Create(pr *domain.PublicRelation) error {
 		if err := tx.Create(pr).Error; err != nil {
 			return err
 		}
-		// Initialize Visitor Count
+
 		vc := domain.PublicRelationVisitorCount{
 			ModulePublicRelationId: pr.ID,
 			Count:                  0,
@@ -169,12 +160,11 @@ func (r *publicRelationRepository) Create(pr *domain.PublicRelation) error {
 
 func (r *publicRelationRepository) Update(pr *domain.PublicRelation) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
-		// Clean up existing images first
+
 		if err := tx.Where("module_public_relation_id = ?", pr.ID).Delete(&domain.PublicRelationImage{}).Error; err != nil {
 			return err
 		}
 
-		// Insert new images
 		for i := range pr.Images {
 			pr.Images[i].ModulePublicRelationId = pr.ID
 			if err := tx.Create(&pr.Images[i]).Error; err != nil {
@@ -188,7 +178,7 @@ func (r *publicRelationRepository) Update(pr *domain.PublicRelation) error {
 
 func (r *publicRelationRepository) Delete(moduleId string, id string) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
-		// Delete related records
+
 		tx.Where("module_public_relation_id = ?", id).Delete(&domain.PublicRelationImage{})
 		tx.Where("module_public_relation_id = ?", id).Delete(&domain.PublicRelationComment{})
 		tx.Where("module_public_relation_id = ?", id).Delete(&domain.PublicRelationLike{})
@@ -198,7 +188,7 @@ func (r *publicRelationRepository) Delete(moduleId string, id string) error {
 }
 
 func (r *publicRelationRepository) HideComment(moduleId string, prId string, commentId string) error {
-	// First verify news module ownership
+
 	var count int64
 	r.db.Model(&domain.PublicRelation{}).Where("module_id = ? AND id = ?", moduleId, prId).Count(&count)
 	if count == 0 {
@@ -211,7 +201,7 @@ func (r *publicRelationRepository) HideComment(moduleId string, prId string, com
 }
 
 func (r *publicRelationRepository) ShowComment(moduleId string, prId string, commentId string) error {
-	// First verify news module ownership
+
 	var count int64
 	r.db.Model(&domain.PublicRelation{}).Where("module_id = ? AND id = ?", moduleId, prId).Count(&count)
 	if count == 0 {
@@ -223,7 +213,6 @@ func (r *publicRelationRepository) ShowComment(moduleId string, prId string, com
 		Update("status", "active").Error
 }
 
-// Notifications
 func (r *publicRelationRepository) GetPaginatedNotifications(moduleId string, query domain.PublicRelationNotificationQuery, history bool) (*domain.PaginatedNotificationResponse, error) {
 	var items []domain.PublicRelationNotification
 	var total int64
@@ -231,9 +220,9 @@ func (r *publicRelationRepository) GetPaginatedNotifications(moduleId string, qu
 	db := r.db.Model(&domain.PublicRelationNotification{}).Where("module_id = ?", moduleId)
 
 	if history {
-		db = db.Where("process_status = ?", "success")
+		db = db.Where("status = ? AND (process_status = ? OR (send_date IS NOT NULL AND send_date <= ?))", "active", "success", time.Now())
 	} else {
-		db = db.Where("process_status != ?", "success")
+		db = db.Where("status != ? OR (status = ? AND process_status != ? AND (send_date IS NULL OR send_date > ?))", "active", "active", "success", time.Now())
 	}
 
 	if query.Title != nil && *query.Title != "" {
@@ -289,7 +278,6 @@ func (r *publicRelationRepository) DeleteNotification(moduleId string, id string
 	return r.db.Where("module_id = ? AND id = ?", moduleId, id).Delete(&domain.PublicRelationNotification{}).Error
 }
 
-// Welcome Screen
 func (r *publicRelationRepository) GetWelcomeScreens() ([]domain.MunicipalityWelcomeScreen, error) {
 	var screens []domain.MunicipalityWelcomeScreen
 	err := r.db.Order("created_date DESC").Find(&screens).Error

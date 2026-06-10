@@ -2,6 +2,7 @@ package repository
 
 import (
 	"super-app-chonburi-go/internal/domain"
+
 	"gorm.io/gorm"
 )
 
@@ -59,7 +60,7 @@ func (r *adminRepository) GetPaginated(query domain.AdminQuery) (*domain.Paginat
 		Offset(offset).
 		Limit(query.PageSize).
 		Find(&admins).Error
-	
+
 	return &domain.PaginatedAdminResponse{
 		Items:      admins,
 		TotalItems: total,
@@ -69,23 +70,23 @@ func (r *adminRepository) GetPaginated(query domain.AdminQuery) (*domain.Paginat
 }
 
 func (r *adminRepository) Create(admin *domain.Admin) error {
-	// Use Transaction to ensure both admin and associations are saved correctly
+
 	return r.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(admin).Error; err != nil {
 			return err
 		}
-		// Save associations separately to avoid overwriting department names
+
 		return tx.Model(admin).Association("Departments").Replace(admin.Departments)
 	})
 }
 
 func (r *adminRepository) Update(admin *domain.Admin) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
-		// Update the many-to-many associations first
+
 		if err := tx.Model(admin).Association("Departments").Replace(admin.Departments); err != nil {
 			return err
 		}
-		// Save the admin record itself without touching associations' fields
+
 		return tx.Save(admin).Error
 	})
 }

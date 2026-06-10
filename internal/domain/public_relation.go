@@ -6,7 +6,6 @@ import (
 	"github.com/google/uuid"
 )
 
-// module_public_relations
 type PublicRelation struct {
 	ID            uuid.UUID `gorm:"type:uuid;primaryKey;column:id" json:"id"`
 	ModuleId      uuid.UUID `gorm:"type:uuid;index;not null;column:module_id" json:"module_id"`
@@ -24,7 +23,6 @@ type PublicRelation struct {
 	CreatedBy     string    `gorm:"type:text;not null;column:created_by" json:"created_by"`
 	UpdatedBy     string    `gorm:"type:text;not null;column:updated_by" json:"updated_by"`
 
-	// Relations
 	Images       []PublicRelationImage       `gorm:"foreignKey:ModulePublicRelationId" json:"images,omitempty"`
 	Likes        []PublicRelationLike        `gorm:"foreignKey:ModulePublicRelationId" json:"likes,omitempty"`
 	Comments     []PublicRelationComment     `gorm:"foreignKey:ModulePublicRelationId" json:"comments,omitempty"`
@@ -35,7 +33,6 @@ type PublicRelation struct {
 
 func (PublicRelation) TableName() string { return "module_public_relations" }
 
-// module_public_relation_visitor_count
 type PublicRelationVisitorCount struct {
 	ModulePublicRelationId uuid.UUID `gorm:"type:uuid;primaryKey;column:module_public_relation_id" json:"module_public_relation_id"`
 	Count                  int       `gorm:"type:int4;not null;column:count" json:"count"`
@@ -47,29 +44,29 @@ type PublicRelationVisitorCount struct {
 
 func (PublicRelationVisitorCount) TableName() string { return "module_public_relation_visitor_count" }
 
-// module_public_relation_notifications
 type PublicRelationNotification struct {
-	ID            uuid.UUID  `gorm:"type:uuid;primaryKey;column:id" json:"id"`
-	ModuleId      uuid.UUID  `gorm:"type:uuid;index;not null;column:module_id" json:"module_id"`
-	AdminUserId   uuid.UUID  `gorm:"type:uuid;index;not null;column:admin_user_id" json:"admin_user_id"`
-	Title         string     `gorm:"type:text;not null;column:title" json:"title"`
-	Description   *string    `gorm:"type:text;column:description" json:"description"`
-	SendDate      *time.Time `gorm:"type:timestamptz;column:send_date" json:"send_date"`
-	Type          string     `gorm:"type:text;not null;column:type" json:"type"`
-	Status        string     `gorm:"type:text;not null;column:status" json:"status"`
-	ProcessStatus string     `gorm:"type:text;not null;column:process_status" json:"process_status"`
-	CreatedDate   time.Time  `gorm:"type:timestamptz;not null;column:created_date" json:"created_date"`
-	UpdatedDate   time.Time  `gorm:"type:timestamptz;not null;column:updated_date" json:"updated_date"`
-	CreatedBy     string     `gorm:"type:text;not null;column:created_by" json:"created_by"`
-	UpdatedBy     string     `gorm:"type:text;not null;column:updated_by" json:"updated_by"`
+	ID               uuid.UUID  `gorm:"type:uuid;primaryKey;column:id" json:"id"`
+	ModuleId         uuid.UUID  `gorm:"type:uuid;index;not null;column:module_id" json:"module_id"`
+	AdminUserId      uuid.UUID  `gorm:"type:uuid;index;not null;column:admin_user_id" json:"admin_user_id"`
+	PublicRelationID *uuid.UUID `gorm:"type:uuid;column:public_relation_id" json:"public_relation_id,omitempty"`
+	Title            string     `gorm:"type:text;not null;column:title" json:"title"`
+	Description      *string    `gorm:"type:text;column:description" json:"description"`
+	SendDate         *time.Time `gorm:"type:timestamptz;column:send_date" json:"send_date"`
+	Type             string     `gorm:"type:text;not null;column:type" json:"type"`
+	Status           string     `gorm:"type:text;not null;column:status" json:"status"`
+	ProcessStatus    string     `gorm:"type:text;not null;column:process_status" json:"process_status"`
+	CreatedDate      time.Time  `gorm:"type:timestamptz;not null;column:created_date" json:"created_date"`
+	UpdatedDate      time.Time  `gorm:"type:timestamptz;not null;column:updated_date" json:"updated_date"`
+	CreatedBy        string     `gorm:"type:text;not null;column:created_by" json:"created_by"`
+	UpdatedBy        string     `gorm:"type:text;not null;column:updated_by" json:"updated_by"`
 
-	AdminUser *Admin  `gorm:"foreignKey:AdminUserId" json:"admin_user,omitempty"`
-	Module    *Module `gorm:"foreignKey:ModuleId" json:"module,omitempty"`
+	AdminUser      *Admin          `gorm:"foreignKey:AdminUserId" json:"admin_user,omitempty"`
+	Module         *Module         `gorm:"foreignKey:ModuleId" json:"module,omitempty"`
+	PublicRelation *PublicRelation `gorm:"foreignKey:PublicRelationID" json:"public_relation,omitempty"`
 }
 
 func (PublicRelationNotification) TableName() string { return "module_public_relation_notifications" }
 
-// module_public_relation_likes
 type PublicRelationLike struct {
 	ModulePublicRelationId uuid.UUID `gorm:"type:uuid;primaryKey;column:module_public_relation_id" json:"module_public_relation_id"`
 	UserId                 uuid.UUID `gorm:"type:uuid;primaryKey;column:user_id" json:"user_id"`
@@ -81,7 +78,6 @@ type PublicRelationLike struct {
 
 func (PublicRelationLike) TableName() string { return "module_public_relation_likes" }
 
-// module_public_relation_images
 type PublicRelationImage struct {
 	ID                     uuid.UUID `gorm:"type:uuid;primaryKey;column:id" json:"id"`
 	ModulePublicRelationId uuid.UUID `gorm:"type:uuid;index;not null;column:module_public_relation_id" json:"module_public_relation_id"`
@@ -95,7 +91,6 @@ type PublicRelationImage struct {
 
 func (PublicRelationImage) TableName() string { return "module_public_relation_images" }
 
-// module_public_relation_comments
 type PublicRelationComment struct {
 	ID                     uuid.UUID `gorm:"type:uuid;primaryKey;column:id" json:"id"`
 	ModulePublicRelationId uuid.UUID `gorm:"type:uuid;index;not null;column:module_public_relation_id" json:"module_public_relation_id"`
@@ -112,7 +107,6 @@ type PublicRelationComment struct {
 
 func (PublicRelationComment) TableName() string { return "module_public_relation_comments" }
 
-// municipality_welcome_screens
 type MunicipalityWelcomeScreen struct {
 	ID          uuid.UUID `gorm:"type:uuid;primaryKey;column:id" json:"id"`
 	ImageUrl    string    `gorm:"type:text;not null;column:image_url" json:"image_url"`
@@ -126,7 +120,6 @@ type MunicipalityWelcomeScreen struct {
 
 func (MunicipalityWelcomeScreen) TableName() string { return "municipality_welcome_screens" }
 
-// Query types
 type PublicRelationQuery struct {
 	PageNumber int
 	PageSize   int
@@ -173,14 +166,11 @@ type PublicRelationDashboardStats struct {
 	ReportedCommentsCount  int64 `json:"reported_comments_count"`
 }
 
-// Interfaces
 type PublicRelationRepository interface {
-	// Dashboard
 	GetDashboardStats(moduleId string) (*PublicRelationDashboardStats, error)
 	GetPopularNews(moduleId string, limit int) ([]PublicRelation, error)
 	GetExpiringNews(moduleId string, limit int) ([]PublicRelation, error)
 
-	// News
 	GetPaginated(moduleId string, query PublicRelationQuery) (*PaginatedPublicRelationResponse, error)
 	GetByID(moduleId string, id string) (*PublicRelation, error)
 	Create(pr *PublicRelation) error
@@ -189,14 +179,12 @@ type PublicRelationRepository interface {
 	HideComment(moduleId string, prId string, commentId string) error
 	ShowComment(moduleId string, prId string, commentId string) error
 
-	// Notifications
 	GetPaginatedNotifications(moduleId string, query PublicRelationNotificationQuery, history bool) (*PaginatedNotificationResponse, error)
 	GetNotificationByID(moduleId string, id string) (*PublicRelationNotification, error)
 	CreateNotification(notification *PublicRelationNotification) error
 	UpdateNotification(notification *PublicRelationNotification) error
 	DeleteNotification(moduleId string, id string) error
 
-	// Welcome Screen
 	GetWelcomeScreens() ([]MunicipalityWelcomeScreen, error)
 	CreateWelcomeScreen(screen *MunicipalityWelcomeScreen) error
 	UpdateWelcomeScreen(screen *MunicipalityWelcomeScreen) error
@@ -204,12 +192,10 @@ type PublicRelationRepository interface {
 }
 
 type PublicRelationUseCase interface {
-	// Dashboard
 	GetDashboardStats(moduleId string) (*PublicRelationDashboardStats, error)
 	GetPopularNews(moduleId string, limit int) ([]PublicRelation, error)
 	GetExpiringNews(moduleId string, limit int) ([]PublicRelation, error)
 
-	// News
 	GetPaginated(moduleId string, query PublicRelationQuery) (*PaginatedPublicRelationResponse, error)
 	GetByID(moduleId string, id string) (*PublicRelation, error)
 	Create(pr *PublicRelation, adminID string) error
@@ -218,14 +204,12 @@ type PublicRelationUseCase interface {
 	HideComment(moduleId string, prId string, commentId string, adminID string) error
 	ShowComment(moduleId string, prId string, commentId string, adminID string) error
 
-	// Notifications
 	GetPaginatedNotifications(moduleId string, query PublicRelationNotificationQuery, history bool) (*PaginatedNotificationResponse, error)
 	GetNotificationByID(moduleId string, id string) (*PublicRelationNotification, error)
 	CreateNotification(notification *PublicRelationNotification, adminID string) error
 	UpdateNotification(notification *PublicRelationNotification, adminID string) error
 	DeleteNotification(moduleId string, id string, adminID string) error
 
-	// Welcome Screen
 	GetWelcomeScreens() ([]MunicipalityWelcomeScreen, error)
 	UploadWelcomeScreen(screen *MunicipalityWelcomeScreen, adminID string) error
 }

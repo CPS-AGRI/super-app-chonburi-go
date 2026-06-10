@@ -25,7 +25,6 @@ func (r *dashboardRepository) GetBackOffice(filter domain.DashboardFilter) (*dom
 	var allModules []domain.Module
 	r.db.Find(&allModules)
 
-	// User Activity Queries
 	activityQuery := r.db.Model(&domain.UserActivityTracking{})
 	if filter.StartDate != nil {
 		activityQuery = activityQuery.Where("date >= ?", filter.StartDate.Truncate(24*time.Hour))
@@ -37,13 +36,11 @@ func (r *dashboardRepository) GetBackOffice(filter domain.DashboardFilter) (*dom
 	var trackings []domain.UserActivityTracking
 	activityQuery.Find(&trackings)
 
-	// Calculate overall usage
 	totalLoginUsersCount := 0
 	for _, t := range trackings {
 		totalLoginUsersCount += t.ViewCount
 	}
 
-	// Calculate gender and age
 	maleUsers := 0
 	femaleUsers := 0
 	var ageGender domain.AgeGenderDTO
@@ -52,7 +49,7 @@ func (r *dashboardRepository) GetBackOffice(filter domain.DashboardFilter) (*dom
 		if u.Information == nil {
 			continue
 		}
-		
+
 		info := u.Information
 		if info.Prefix == "นาย" || info.Prefix == "Mr" || info.Prefix == "Mr." || info.Prefix == "เด็กชาย" {
 			maleUsers++
@@ -98,7 +95,6 @@ func (r *dashboardRepository) GetBackOffice(filter domain.DashboardFilter) (*dom
 		persentFemale = (float64(femaleUsers) / float64(totalUsers)) * 100.0
 	}
 
-	// Daily calculations
 	startDate := dateNow
 	if filter.StartDate != nil {
 		startDate = filter.StartDate.Truncate(24 * time.Hour)
@@ -114,7 +110,6 @@ func (r *dashboardRepository) GetBackOffice(filter domain.DashboardFilter) (*dom
 			Date: d,
 		}
 
-		// Count users created on this day
 		for _, u := range users {
 			if u.CreatedDate.Truncate(24 * time.Hour).Equal(d) {
 				daily.TotalDailyUserUsageCount++
@@ -124,7 +119,6 @@ func (r *dashboardRepository) GetBackOffice(filter domain.DashboardFilter) (*dom
 			}
 		}
 
-		// Count logins/views on this day
 		for _, t := range trackings {
 			if t.Date.Truncate(24 * time.Hour).Equal(d) {
 				daily.TotalDailyLoginUserUsageCount += t.ViewCount
@@ -134,7 +128,6 @@ func (r *dashboardRepository) GetBackOffice(filter domain.DashboardFilter) (*dom
 		dailyUsers = append(dailyUsers, daily)
 	}
 
-	// Module calculations
 	var moduleUsages []domain.ModuleUsageDTO
 	totalModuleUsage := 0
 	for _, m := range allModules {
@@ -145,7 +138,7 @@ func (r *dashboardRepository) GetBackOffice(filter domain.DashboardFilter) (*dom
 				count += t.ViewCount
 			}
 		}
-		
+
 		totalModuleUsage += count
 		moduleUsages = append(moduleUsages, domain.ModuleUsageDTO{
 			ModuleId: m.ID,
@@ -157,7 +150,6 @@ func (r *dashboardRepository) GetBackOffice(filter domain.DashboardFilter) (*dom
 		})
 	}
 
-	// Count verified users overall
 	verifiedUsers := 0
 	for _, u := range users {
 		if u.Information != nil && u.Information.Status == "active" {
@@ -198,19 +190,17 @@ func (r *dashboardRepository) SeedMockData(municipalityId string) error {
 	r.db.Find(&allModules)
 
 	if len(allModules) == 0 {
-		return nil // No modules to seed activity for
+		return nil
 	}
 
 	dateNow := time.Now().UTC()
 
-	// 1. Generate 100 AppUsers
 	prefixes := []string{"นาย", "นาง", "นางสาว"}
-	
+
 	for i := 0; i < 100; i++ {
-		// Randomize prefix
+
 		prefix := prefixes[i%3]
-		
-		// Randomize age between 18 and 70
+
 		age := 18 + (i % 52)
 		birthYear := dateNow.Year() - age
 		birthday := time.Date(birthYear, time.Month((i%12)+1), (i%28)+1, 0, 0, 0, 0, time.UTC)
@@ -224,15 +214,15 @@ func (r *dashboardRepository) SeedMockData(municipalityId string) error {
 		lastName := "ระบบ"
 
 		user := domain.AppUser{
-			ID:             uuid.New(),
-			PhoneNumber:    "08" + uuid.New().String()[:8],
-			PinHash:        "dummy",
-			CreatedBy:      "system",
-			CreatedDate:    dateNow.AddDate(0, 0, -(i % 30)),
-			UpdatedBy:      "system",
-			UpdatedDate:    dateNow,
+			ID:          uuid.New(),
+			PhoneNumber: "08" + uuid.New().String()[:8],
+			PinHash:     "dummy",
+			CreatedBy:   "system",
+			CreatedDate: dateNow.AddDate(0, 0, -(i % 30)),
+			UpdatedBy:   "system",
+			UpdatedDate: dateNow,
 		}
-		
+
 		info := domain.UserInformation{
 			UserId:      user.ID,
 			Prefix:      prefix,
@@ -255,21 +245,20 @@ func (r *dashboardRepository) SeedMockData(municipalityId string) error {
 		})
 	}
 
-	// 2. Generate Activity Tracking for last 30 days
 	var mockActivities []domain.UserActivityTracking
 	for i := 0; i < 30; i++ {
 		d := dateNow.AddDate(0, 0, -i).Truncate(24 * time.Hour)
-		
+
 		for _, m := range allModules {
-			// Random view count between 5 and 50
+
 			views := 5 + ((i + len(m.NameEn)) % 45)
-			
+
 			moduleUUID, _ := uuid.Parse(m.ID)
 			mockActivities = append(mockActivities, domain.UserActivityTracking{
-				ID:             uuid.New(),
-				Date:           d,
-				ModuleId:       moduleUUID,
-				ViewCount:      views,
+				ID:        uuid.New(),
+				Date:      d,
+				ModuleId:  moduleUUID,
+				ViewCount: views,
 			})
 		}
 	}

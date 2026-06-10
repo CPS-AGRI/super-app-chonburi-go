@@ -21,9 +21,8 @@ type MunicipalityBank struct {
 	UpdatedAt         time.Time `gorm:"type:timestamptz;not null;default:CURRENT_TIMESTAMP;column:updated_date" json:"updatedAt"`
 	BankBranch        string    `gorm:"type:text;column:bank_branch" json:"bankBranch"`
 	Status            string    `gorm:"type:text;not null;default:'active';column:status" json:"status"`
-	
-	// Preserved for frontend compatibility
-	PromptPayNumber   string    `gorm:"type:text;column:prompt_pay_number" json:"promptPayNumber"`
+
+	PromptPayNumber string `gorm:"type:text;column:prompt_pay_number" json:"promptPayNumber"`
 }
 
 func (MunicipalityBank) TableName() string {

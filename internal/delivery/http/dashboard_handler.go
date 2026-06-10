@@ -19,7 +19,7 @@ func NewDashboardHandler(uc domain.DashboardUseCase) *DashboardHandler {
 func (h *DashboardHandler) RegisterRoutes(router fiber.Router) {
 	dashboard := router.Group("/dashboard")
 	protected := dashboard.Group("", jwtutil.RequireAuth())
-	
+
 	protected.Get("/back-office", h.GetBackOffice)
 	protected.Post("/seed", h.SeedMockData)
 }

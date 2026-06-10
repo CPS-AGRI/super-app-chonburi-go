@@ -23,20 +23,16 @@ func (r *complaintRepository) GetPaginated(query domain.ComplaintQuery) (*domain
 
 	db := r.db.Model(&domain.Complaint{})
 
-	// Always exclude drafts
 	db = db.Where("module_complaints.status != ?", domain.ComplaintStatusDraft)
 
-	// Join with user_informations for searching
 	db = db.Joins("LEFT JOIN user_informations ON user_informations.user_id = module_complaints.user_id")
 
-	// 1. Status Filter
 	if len(query.Status) > 0 {
 		db = db.Where("module_complaints.status IN ?", query.Status)
 	} else {
 		db = db.Where("module_complaints.status != ?", domain.ComplaintStatusDraft)
 	}
 
-	// 2. Search Filters
 	if query.Name != nil && *query.Name != "" {
 		db = db.Where("user_informations.name ILIKE ?", "%"+*query.Name+"%")
 	}
@@ -59,9 +55,8 @@ func (r *complaintRepository) GetPaginated(query domain.ComplaintQuery) (*domain
 		db = db.Where("module_complaints.assignee_id = ?", *query.AssigneeId)
 	}
 
-	// 3. Visibility Logic
 	if !query.IsSuperAdmin {
-		// Determine Global Workflow Mode from Municipality Settings
+
 		var municipality domain.Municipality
 		r.db.First(&municipality)
 		isCentralMode := municipality.ComplaintMode == "central"
@@ -74,24 +69,17 @@ func (r *complaintRepository) GetPaginated(query domain.ComplaintQuery) (*domain
 			}
 		}
 
-		// Determine if we are in a Dashboard-specific view
-		// Center admins always get full visibility regardless of params
 		isDashboardView := query.HasBeenAssigned != nil || isRequestingRejected || query.IsComplaintCenter
 
 		if query.AssigneeId != nil {
-			// If querying specifically for an assignee, bypass department filtering
-			// so that assigned employees can always see their own tasks.
+
 			if query.AdminRoleType == "Employees" {
 				db = db.Where("module_complaints.status NOT IN ?", []string{domain.ComplaintStatusPending, domain.ComplaintStatusReceived})
 			}
 		} else if query.IsComplaintCenter && isDashboardView {
-			// --- 1. Dashboard View (Center Admin) ---
-			// In BOTH Option 1 and Option 2, the center can see ALL complaints.
-			// The difference:
-			//   Option 1 (direct): Complaints go to departments directly; center sees everything as observer + manager.
-			//   Option 2 (central): Complaints come to center first; center forwards to departments.
+
 			if isCentralMode {
-				// Option 2: filter by assignment state (for tabs: new, returned, history)
+
 				if query.HasBeenAssigned != nil && !isRequestingRejected {
 					if *query.HasBeenAssigned {
 						db = db.Where("module_complaints.department_id IS NOT NULL")
@@ -99,26 +87,28 @@ func (r *complaintRepository) GetPaginated(query domain.ComplaintQuery) (*domain
 						db = db.Where("module_complaints.department_id IS NULL")
 					}
 				}
+			} else {
+
+				isPendingOnly := len(query.Status) == 1 && query.Status[0] == domain.ComplaintStatusPending
+				if isPendingOnly {
+					db = db.Where("1 = 0")
+				}
 			}
-			// Option 1: no extra filter — center sees everything (all statuses, all departments)
 		} else {
-			// --- 2. Manage Page or Regular Admin View ---
+
 			if isCentralMode {
-				// Option 2 Hybrid Logic:
-				// 1. Show complaints explicitly assigned to these departments
-				// 2. Show legacy complaints (department_id IS NULL) that were already handled (status != pending)
-				//    and belong to categories these departments manage (based on their allowed module types).
+
 				if len(query.AdminDepartmentIDs) > 0 {
 					db = db.Where(
 						"(module_complaints.department_id IN ?) OR (module_complaints.department_id IS NULL AND module_complaints.status != ? AND module_complaints.module_type_id IN ?)",
 						query.AdminDepartmentIDs, domain.ComplaintStatusPending, query.AllowedModuleTypeIDs,
 					)
 				} else {
-					// Non-center admins with no departments see nothing
+
 					db = db.Where("1 = 0")
 				}
 			} else {
-				// Option 1: Filter by allowed module types
+
 				if len(query.AllowedModuleTypeIDs) > 0 {
 					db = db.Where("module_complaints.module_type_id IN ?", query.AllowedModuleTypeIDs)
 				} else {
@@ -126,13 +116,10 @@ func (r *complaintRepository) GetPaginated(query domain.ComplaintQuery) (*domain
 				}
 			}
 
-			// Hide rejected from manage page in all modes as requested (Point 67 in MD)
 			if !isRequestingRejected {
 				db = db.Where("module_complaints.status != ?", domain.ComplaintStatusRejected)
 			}
 
-			// New Requirement: Hide pending and received from regular staff (Employees role)
-			// They should only see work assigned to them (managed via assignee_id param from FE)
 			if query.AdminRoleType == "Employees" {
 				db = db.Where("module_complaints.status NOT IN ?", []string{domain.ComplaintStatusPending, domain.ComplaintStatusReceived})
 			}
@@ -150,17 +137,16 @@ func (r *complaintRepository) GetPaginated(query domain.ComplaintQuery) (*domain
 		Order("module_complaints.created_date DESC").
 		Find(&complaints).Error
 
-	// Map virtual UserInformation and Assignee
 	if err == nil {
 		assigneeIDs := []string{}
 		for i := range complaints {
 			if complaints[i].AssigneeId != nil {
 				assigneeIDs = append(assigneeIDs, *complaints[i].AssigneeId)
 			}
-			
+
 			if complaints[i].User != nil && complaints[i].User.Information != nil {
 				info := *complaints[i].User.Information
-				// Strip ENC_ prefix if present
+
 				if len(info.IdentityNumberEncrypted) > 4 && info.IdentityNumberEncrypted[:4] == "ENC_" {
 					info.IdentityNumberEncrypted = info.IdentityNumberEncrypted[4:]
 				}
@@ -185,12 +171,12 @@ func (r *complaintRepository) GetPaginated(query domain.ComplaintQuery) (*domain
 	}
 
 	return &domain.PaginatedComplaintResponse{
-		Items:      complaints,
-		TotalItems: total,
-		PageNumber: query.PageNumber,
-		PageSize:   query.PageSize,
-		TotalPages: int((total + int64(query.PageSize) - 1) / int64(query.PageSize)),
-		HasNext:    total > int64(query.PageNumber*query.PageSize),
+		Items:       complaints,
+		TotalItems:  total,
+		PageNumber:  query.PageNumber,
+		PageSize:    query.PageSize,
+		TotalPages:  int((total + int64(query.PageSize) - 1) / int64(query.PageSize)),
+		HasNext:     total > int64(query.PageNumber*query.PageSize),
 		HasPrevious: query.PageNumber > 1,
 	}, err
 }
@@ -222,7 +208,7 @@ func (r *complaintRepository) GetByID(id string, allowedModuleTypeIDs []string, 
 	}
 
 	if err == nil {
-		// Populate Assignee
+
 		if complaint.AssigneeId != nil {
 			var assignee domain.Admin
 			if r.db.Where("id = ?", *complaint.AssigneeId).First(&assignee).Error == nil {
@@ -230,7 +216,6 @@ func (r *complaintRepository) GetByID(id string, allowedModuleTypeIDs []string, 
 			}
 		}
 
-		// Populate Activities Admin
 		if len(complaint.Activities) > 0 {
 			adminIDs := []string{}
 			for _, act := range complaint.Activities {
@@ -372,7 +357,6 @@ func (r *complaintRepository) GetRatingSummaries(summaryType string) ([]domain.C
 		}
 	}
 
-	// Sort summaries by average_score DESC (highest rating first)
 	sort.Slice(summaries, func(i, j int) bool {
 		if summaries[i].AverageScore == summaries[j].AverageScore {
 			return summaries[i].TotalRatings > summaries[j].TotalRatings
@@ -390,7 +374,7 @@ func (r *complaintRepository) GetOverviewStats() (*domain.ComplaintOverviewStats
 	r.db.Model(&domain.Complaint{}).Where("status = ?", domain.ComplaintStatusReceived).Count(&stats.Received)
 	r.db.Model(&domain.Complaint{}).Where("status = ?", domain.ComplaintStatusInProgress).Count(&stats.InProgress)
 	r.db.Model(&domain.Complaint{}).Where("status = ?", domain.ComplaintStatusCompleted).Count(&stats.Completed)
-	// Disputed = complaints that have a dispute_request activity and are now pending
+
 	r.db.Model(&domain.Complaint{}).
 		Joins("JOIN module_complaint_activities act ON act.module_complaint_id = module_complaints.id").
 		Where("act.status = ? AND module_complaints.status = ?", domain.ActivityStatusDisputeRequest, domain.ComplaintStatusPending).
@@ -404,11 +388,10 @@ func (r *complaintRepository) CreateRatingHistory(history *domain.ComplaintRatin
 }
 
 func (r *complaintRepository) GetCompleterInfo(complaintID string) (*string, *string, error) {
-	// 1. Fetch the complaint to check its department_id first
+
 	var complaint domain.Complaint
 	errComp := r.db.Select("id, assignee_id, department_id").First(&complaint, "id = ?", complaintID).Error
 
-	// 2. Find last completed activity
 	var completedBy string
 	err := r.db.Table("module_complaint_activities").
 		Where("module_complaint_id = ? AND status = ?", complaintID, "completed").
@@ -424,13 +407,12 @@ func (r *complaintRepository) GetCompleterInfo(complaintID string) (*string, *st
 		assigneeIDPtr = complaint.AssigneeId
 	}
 
-	// 3. Determine the department_id
 	var deptIDPtr *string
 	if errComp == nil && complaint.DepartmentId != nil {
-		// [Option 2: Central Mode] Use the department that the complaint was explicitly assigned/forwarded to
+
 		deptIDPtr = complaint.DepartmentId
 	} else if assigneeIDPtr != nil {
-		// [Option 1: Direct Mode / Fallback] Use the department of the employee who completed the work
+
 		var deptID string
 		errDept := r.db.Table("admin_departments").
 			Where("admin_id = ?", *assigneeIDPtr).

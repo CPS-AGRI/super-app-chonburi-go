@@ -18,8 +18,7 @@ func NewMunicipalityWorkScheduleHandler(uc domain.MunicipalityWorkScheduleUseCas
 
 func (h *MunicipalityWorkScheduleHandler) RegisterRoutes(router fiber.Router) {
 	shifts := router.Group("/municipalities/shifts")
-	
-	// Protected routes
+
 	protected := shifts.Group("", jwtutil.RequireAuth())
 	protected.Get("/", h.GetAllShifts)
 	protected.Post("/", h.CreateShift)

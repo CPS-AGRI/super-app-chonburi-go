@@ -50,8 +50,8 @@ type DashboardBackOfficeModuleDTO struct {
 }
 
 type DashboardFilter struct {
-	StartDate      *time.Time
-	EndDate        *time.Time
+	StartDate *time.Time
+	EndDate   *time.Time
 }
 
 type DashboardRepository interface {

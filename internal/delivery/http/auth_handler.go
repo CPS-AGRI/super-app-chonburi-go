@@ -35,7 +35,6 @@ func (h *AuthHandler) Login(c fiber.Ctx) error {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Invalid email or password"})
 	}
 
-	// Fetch full profile with permissions
 	admin, permissions, _ := h.uc.Me(user.GetID())
 
 	c.Cookie(&fiber.Cookie{
@@ -73,7 +72,6 @@ func (h *AuthHandler) Refresh(c fiber.Ctx) error {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": err.Error()})
 	}
 
-	// Fetch full profile with permissions
 	admin, permissions, _ := h.uc.Me(user.GetID())
 
 	c.Cookie(&fiber.Cookie{
@@ -99,7 +97,7 @@ func (h *AuthHandler) Refresh(c fiber.Ctx) error {
 }
 
 func (h *AuthHandler) Logout(c fiber.Ctx) error {
-	// ลบ Refresh Token ใน DB (ถ้าส่งมา)
+
 	var req struct {
 		RefreshToken string `json:"refreshToken"`
 	}

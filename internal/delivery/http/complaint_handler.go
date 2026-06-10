@@ -224,14 +224,15 @@ func (h *ComplaintHandler) Rate(c fiber.Ctx) error {
 func (h *ComplaintHandler) Dispute(c fiber.Ctx) error {
 	id := c.Params("id")
 	var req struct {
-		Reason string `json:"reason"`
+		Reason string   `json:"reason"`
+		Images []string `json:"images"`
 	}
 	if err := c.Bind().JSON(&req); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
 	}
 
 	adminID, _ := GetAdminIDFromClaims(c)
-	if err := h.uc.DisputeComplaint(id, adminID, req.Reason); err != nil {
+	if err := h.uc.DisputeComplaint(id, adminID, req.Reason, req.Images); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
 	return c.JSON(fiber.Map{"message": "dispute submitted successfully"})

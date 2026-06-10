@@ -2,6 +2,7 @@ package domain
 
 import (
 	"time"
+
 	"github.com/google/uuid"
 )
 
@@ -20,7 +21,6 @@ const (
 	RatingSummaryTypeDepartment = "department"
 )
 
-// complaint_rating_summaries
 type ComplaintRatingSummary struct {
 	ID            string    `gorm:"type:uuid;primaryKey;column:id" json:"id"`
 	SummaryType   string    `gorm:"not null;column:summary_type;index" json:"summary_type"`
@@ -40,39 +40,36 @@ type ComplaintRating struct {
 	Comment string `json:"comment"`
 }
 
-// module_complaints
 type Complaint struct {
-	ID                uuid.UUID      `gorm:"type:uuid;primaryKey;column:id" json:"id"`
-	ModuleTypeId      string         `gorm:"type:uuid;index;not null;column:module_type_id" json:"module_type_id"`
-	UserId            uuid.UUID      `gorm:"type:uuid;index;not null;column:user_id" json:"user_id"`
-	DocumentId        string         `gorm:"not null;column:document_id;index" json:"document_id"`
-	Description       string         `gorm:"type:text;column:description" json:"description"`
-	Latitude          float64        `gorm:"column:latitude" json:"latitude"`
-	Longitude         float64        `gorm:"column:longitude" json:"longitude"`
-	Status            string         `gorm:"not null;column:status;index" json:"status"`
-	AssignerId        *string        `gorm:"type:uuid;index;column:assigner_id" json:"assigner_id"`
-	AssigneeId        *string        `gorm:"type:uuid;index;column:assignee_id" json:"assignee_id"`
-	CreatedDate       time.Time      `gorm:"not null;type:timestamptz;column:created_date;index" json:"created_at"`
-	UpdatedDate       time.Time      `gorm:"not null;type:timestamptz;column:updated_date" json:"updated_at"`
-	CreatedBy         string         `gorm:"not null;column:created_by" json:"created_by"`
-	UpdatedBy         string         `gorm:"not null;column:updated_by" json:"updated_by"`
-	DepartmentId      *string        `gorm:"type:uuid;index;column:department_id" json:"department_id"`
-	IsOtherModuleType bool           `gorm:"not null;default:false;column:is_other_module_type" json:"is_other_module_type"`
-	IsDisputed        bool           `gorm:"not null;default:false;column:is_disputed;index" json:"is_disputed"`
+	ID                uuid.UUID `gorm:"type:uuid;primaryKey;column:id" json:"id"`
+	ModuleTypeId      string    `gorm:"type:uuid;index;not null;column:module_type_id" json:"module_type_id"`
+	UserId            uuid.UUID `gorm:"type:uuid;index;not null;column:user_id" json:"user_id"`
+	DocumentId        string    `gorm:"not null;column:document_id;index" json:"document_id"`
+	Description       string    `gorm:"type:text;column:description" json:"description"`
+	Latitude          float64   `gorm:"column:latitude" json:"latitude"`
+	Longitude         float64   `gorm:"column:longitude" json:"longitude"`
+	Status            string    `gorm:"not null;column:status;index" json:"status"`
+	AssignerId        *string   `gorm:"type:uuid;index;column:assigner_id" json:"assigner_id"`
+	AssigneeId        *string   `gorm:"type:uuid;index;column:assignee_id" json:"assignee_id"`
+	CreatedDate       time.Time `gorm:"not null;type:timestamptz;column:created_date;index" json:"created_at"`
+	UpdatedDate       time.Time `gorm:"not null;type:timestamptz;column:updated_date" json:"updated_at"`
+	CreatedBy         string    `gorm:"not null;column:created_by" json:"created_by"`
+	UpdatedBy         string    `gorm:"not null;column:updated_by" json:"updated_by"`
+	DepartmentId      *string   `gorm:"type:uuid;index;column:department_id" json:"department_id"`
+	IsOtherModuleType bool      `gorm:"not null;default:false;column:is_other_module_type" json:"is_other_module_type"`
+	IsDisputed        bool      `gorm:"not null;default:false;column:is_disputed;index" json:"is_disputed"`
 
-	// Relations
-	ModuleType      *ModuleType      `gorm:"foreignKey:ModuleTypeId" json:"module_type,omitempty"`
-	Department      *Department      `gorm:"foreignKey:DepartmentId" json:"department,omitempty"`
-	User            *AppUser         `gorm:"foreignKey:UserId;references:ID" json:"user,omitempty"`
-	UserInformation *UserInformation `gorm:"-" json:"user_information,omitempty"`
-	Images          []ComplaintImage `gorm:"foreignKey:ModuleComplaintId" json:"images,omitempty"`
+	ModuleType      *ModuleType         `gorm:"foreignKey:ModuleTypeId" json:"module_type,omitempty"`
+	Department      *Department         `gorm:"foreignKey:DepartmentId" json:"department,omitempty"`
+	User            *AppUser            `gorm:"foreignKey:UserId;references:ID" json:"user,omitempty"`
+	UserInformation *UserInformation    `gorm:"-" json:"user_information,omitempty"`
+	Images          []ComplaintImage    `gorm:"foreignKey:ModuleComplaintId" json:"images,omitempty"`
 	Activities      []ComplaintActivity `gorm:"foreignKey:ModuleComplaintId" json:"activities,omitempty"`
-	Assignee        *Admin           `gorm:"-" json:"assignee,omitempty"`
+	Assignee        *Admin              `gorm:"-" json:"assignee,omitempty"`
 }
 
 func (Complaint) TableName() string { return "module_complaints" }
 
-// module_complaint_images
 type ComplaintImage struct {
 	ID                uuid.UUID `gorm:"type:uuid;primaryKey;column:id" json:"id"`
 	ModuleComplaintId uuid.UUID `gorm:"type:uuid;index;not null;column:module_complaint_id" json:"module_complaint_id"`
@@ -86,7 +83,6 @@ type ComplaintImage struct {
 
 func (ComplaintImage) TableName() string { return "module_complaint_images" }
 
-// module_complaint_activities
 type ComplaintActivity struct {
 	ID                uuid.UUID `gorm:"type:uuid;primaryKey;column:id" json:"id"`
 	ModuleComplaintId uuid.UUID `gorm:"type:uuid;index;not null;column:module_complaint_id" json:"module_complaint_id"`
@@ -103,7 +99,6 @@ type ComplaintActivity struct {
 
 func (ComplaintActivity) TableName() string { return "module_complaint_activities" }
 
-// module_complaint_activity_images
 type ComplaintActivityImage struct {
 	ID                        uuid.UUID `gorm:"type:uuid;primaryKey;column:id" json:"id"`
 	ModuleComplaintActivityId uuid.UUID `gorm:"type:uuid;index;not null;column:module_complaint_activity_id" json:"module_complaint_activity_id"`
@@ -117,7 +112,6 @@ type ComplaintActivityImage struct {
 
 func (ComplaintActivityImage) TableName() string { return "module_complaint_activity_images" }
 
-// module_complaint_rating_histories
 type ComplaintRatingHistory struct {
 	ID                uuid.UUID `gorm:"type:uuid;primaryKey;column:id" json:"id"`
 	ModuleComplaintId uuid.UUID `gorm:"type:uuid;index;not null;column:module_complaint_id" json:"module_complaint_id"`
@@ -133,14 +127,12 @@ type ComplaintRatingHistory struct {
 
 func (ComplaintRatingHistory) TableName() string { return "module_complaint_rating_histories" }
 
-// Interfaces
 type ComplaintQuery struct {
 	PageNumber int `query:"page_number"`
 	PageSize   int `query:"page_size"`
 	Status     []string
 	AssigneeId *string `query:"assignee_id"`
 
-	// Search Filters
 	IdentityNumber *string `query:"identity_number"`
 	Name           *string `query:"name"`
 	LastName       *string `query:"last_name"`
@@ -200,7 +192,7 @@ type ComplaintUseCase interface {
 	AddActivity(activity *ComplaintActivity, adminID string) error
 	DeleteComplaint(id string) error
 	RateComplaint(id string, userID string, rating int, comment string) error
-	DisputeComplaint(id string, userID string, reason string) error
+	DisputeComplaint(id string, userID string, reason string, images []string) error
 	GetRatingSummaries(summaryType string) ([]ComplaintRatingSummary, error)
 	GetOverviewStats() (*ComplaintOverviewStats, error)
 }

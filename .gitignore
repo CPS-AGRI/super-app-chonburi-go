@@ -35,3 +35,8 @@ go.work.sum
 # OS files
 .DS_Store
 Thumbs.db
+
+# Firebase credentials keys (CRITICAL SECURITY)
+firebase-service-account.json
+super-app-chonburi-*-firebase-adminsdk-*.json
+

@@ -37,19 +37,18 @@ func (u *authUseCase) Login(email, password string) (string, string, domain.User
 		return "", "", nil, err
 	}
 
-	// Generate Refresh Token
 	refreshToken := domain.NewUUID()
 	rt := &domain.AdminRefreshToken{
 		ID:          domain.NewUUID(),
 		Token:       refreshToken,
-		ExpiryTime:  time.Now().Add(7 * 24 * time.Hour), // 7 days
+		ExpiryTime:  time.Now().Add(7 * 24 * time.Hour),
 		AdminUserId: admin.ID,
 		CreatedBy:   admin.ID,
 		UpdatedBy:   admin.ID,
 		CreatedDate: time.Now(),
 		UpdatedDate: time.Now(),
 	}
-	
+
 	if err := u.rtRepo.Create(rt); err != nil {
 		return "", "", nil, err
 	}
@@ -92,13 +91,11 @@ func (u *authUseCase) Me(id string) (*domain.Admin, []string, error) {
 	}
 
 	permissions := []string{}
-	
-	// 1. If superadmin, add system permissions
+
 	if admin.Role != nil && admin.Role.Type == "superadmin" {
 		permissions = append(permissions, "MANAGE_CITY", "MANAGE_ADMINS", "MANAGE_DEPARTMENTS", "VIEW_ALL_REPORTS")
 	}
 
-	// 2. Add permissions from assigned modules
 	uniqueKeys := make(map[string]bool)
 	for _, dept := range admin.Departments {
 		for _, module := range dept.Modules {
@@ -106,10 +103,9 @@ func (u *authUseCase) Me(id string) (*domain.Admin, []string, error) {
 				uniqueKeys[*module.Key] = true
 			}
 
-			// Explicitly grant ModuleComplaintCenter if this is the Center module
-			if module.ID == "d01b2ce5-34a9-498b-bba0-b1b8360f1ea9" || 
-			   module.NameTh == "ศูนย์ร้องทุกข์" || 
-			   module.NameEn == "Complaint Center" {
+			if module.ID == "d01b2ce5-34a9-498b-bba0-b1b8360f1ea9" ||
+				module.NameTh == "ศูนย์ร้องทุกข์" ||
+				module.NameEn == "Complaint Center" {
 				uniqueKeys["ModuleComplaintCenter"] = true
 			}
 		}
