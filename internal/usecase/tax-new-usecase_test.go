@@ -32,6 +32,14 @@ func (m *MockTaxNewRepository) GetBusinessByRegNumber(regNumber string) (*domain
 	return args.Get(0).(*domain.TaxBusiness), args.Error(1)
 }
 
+func (m *MockTaxNewRepository) GetBusinessByOwnerIdentityNumber(identityNumber string) (*domain.TaxBusiness, error) {
+	args := m.Called(identityNumber)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*domain.TaxBusiness), args.Error(1)
+}
+
 func (m *MockTaxNewRepository) GetActiveTaxRate(taxType string) (*domain.TaxRate, error) {
 	args := m.Called(taxType)
 	if args.Get(0) == nil {

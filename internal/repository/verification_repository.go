@@ -222,7 +222,7 @@ func (r *verificationRepository) CreateNotification(notification *domain.ModuleN
 
 func (r *verificationRepository) GetRegisterModuleID() (*uuid.UUID, error) {
 	var m domain.Module
-	err := r.db.Select("id").Where("key = ? OR is_used_for_user_registration_only = true", "register").Limit(1).First(&m).Error
+	err := r.db.Select("id").Where("key = ? OR key = ?", "register", "ModuleIdentityVerifications").Limit(1).First(&m).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil

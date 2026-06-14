@@ -122,3 +122,47 @@ func SendNotificationToDepartment(departmentID string, role string, title, body,
 		log.Printf("[Notif-Helper] ไม่สามารถบันทึกแจ้งเตือนกลุ่มแอดมินได้: %v", err)
 	}
 }
+
+func SendNotificationToAdmin(adminID uuid.UUID, title, body, refID, refStatus, notifType string) {
+	db := database.DB
+	if db == nil {
+		log.Println("[Notif-Helper] ข้อผิดพลาด: database.DB ยังไม่ได้เชื่อมต่อ")
+		return
+	}
+
+	var moduleID uuid.UUID
+	switch notifType {
+	case "complaint", "complaint_assignee":
+		moduleID = uuid.MustParse("5b630777-4de8-42f7-926a-2335879e0f6d")
+	case "tax":
+		moduleID = uuid.MustParse("eadaf67c-db3e-4557-82cd-8bf721c3e2e7")
+	default:
+		if parsed, err := uuid.Parse(notifType); err == nil {
+			moduleID = parsed
+		} else {
+			moduleID = uuid.MustParse("5b630777-4de8-42f7-926a-2335879e0f6d")
+		}
+	}
+
+	newNotif := domain.ModuleNotification{
+		ID:              uuid.New(),
+		ModuleID:        moduleID,
+		UserAdminID:     &adminID,
+		ReferenceID:     refID,
+		ReferenceTitle:  title,
+		ReferenceBody:   body,
+		ReferenceStatus: refStatus,
+		Type:            "admin",
+		Status:          "published",
+		State:           "unread",
+		IsRead:          false,
+		CreatedBy:       "usecase_trigger",
+		CreatedDate:     time.Now(),
+		UpdatedDate:     time.Now(),
+	}
+
+	if err := db.Create(&newNotif).Error; err != nil {
+		log.Printf("[Notif-Helper] ข้อผิดพลาดในการบันทึกแจ้งเตือนแอดมิน: %v", err)
+	}
+}
+

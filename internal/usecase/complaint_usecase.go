@@ -124,7 +124,7 @@ func (u *complaintUseCase) CreateComplaint(complaint *domain.Complaint) error {
 	}
 	SendNotificationToDepartment(
 		deptID,
-		"",
+		"Managers",
 		"มีเรื่องร้องเรียนใหม่ส่งเข้ามา",
 		fmt.Sprintf("เรื่องร้องเรียนเลขที่ %s เรื่อง: %s รอนุมัติรับเรื่องและส่งต่อทำงาน", complaint.DocumentId, complaint.Description),
 		complaint.ID.String(),
@@ -224,7 +224,7 @@ func (u *complaintUseCase) ForwardComplaint(id string, departmentID string, desc
 
 	SendNotificationToDepartment(
 		departmentID,
-		"",
+		"Managers",
 		"มีเรื่องร้องเรียนใหม่ส่งมอบหมายเข้ามา",
 		fmt.Sprintf("เรื่องร้องเรียนเลขที่ %s ได้รับการมอบหมายมายังแผนกของท่านเพื่อประสานงานดำเนินงาน", complaint.DocumentId),
 		complaint.ID.String(),
@@ -279,8 +279,7 @@ func (u *complaintUseCase) AssignComplaint(id string, assigneeID string, descrip
 	}
 
 	if parsedAssignee, err := uuid.Parse(assigneeID); err == nil {
-
-		SendNotificationToUser(
+		SendNotificationToAdmin(
 			parsedAssignee,
 			"ท่านได้รับมอบหมายงานร้องทุกข์ใหม่",
 			fmt.Sprintf("คุณได้รับการแต่งตั้งเป็นผู้ดูแลเคสรหัส %s โปรดดำเนินการตรวจสอบเรื่องและอัปเดตความก้าวหน้า", complaint.DocumentId),
@@ -354,6 +353,19 @@ func (u *complaintUseCase) RejectComplaint(id string, reason string, adminID str
 		"complaint",
 	)
 
+	deptID := ""
+	if complaint.DepartmentId != nil {
+		deptID = *complaint.DepartmentId
+	}
+	SendNotificationToDepartment(
+		deptID,
+		"Managers",
+		"เรื่องร้องเรียนได้รับการปฏิเสธคำร้อง/ตีกลับ",
+		fmt.Sprintf("เรื่องร้องเรียนเลขที่ %s ถูกตีกลับ/ปฏิเสธโดยเจ้าหน้าที่: %s", complaint.DocumentId, reason),
+		complaint.ID.String(),
+		"rejected",
+	)
+
 	return nil
 }
 
@@ -391,6 +403,19 @@ func (u *complaintUseCase) AddActivity(activity *domain.ComplaintActivity, admin
 					complaint.ID.String(),
 					activity.Status,
 					"complaint",
+				)
+
+				deptID := ""
+				if complaint.DepartmentId != nil {
+					deptID = *complaint.DepartmentId
+				}
+				SendNotificationToDepartment(
+					deptID,
+					"Managers",
+					"มีการอัปเดตสถานะเรื่องร้องเรียน",
+					fmt.Sprintf("เรื่องร้องเรียนเลขที่ %s เปลี่ยนสถานะเป็น: %s โดยเจ้าหน้าที่ (%s)", complaint.DocumentId, getThaiComplaintStatus(activity.Status), activity.Description),
+					complaint.ID.String(),
+					activity.Status,
 				)
 			}
 		} else {
