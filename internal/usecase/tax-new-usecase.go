@@ -38,7 +38,18 @@ func NewTaxNewUseCase(repo domain.TaxNewRepository, mailSender mail.EmailSender,
 }
 
 func (u *taxNewUseCase) GetBusiness(regNumber string) (*domain.TaxBusinessDTO, error) {
-	business, err := u.repo.GetBusinessByRegNumber(regNumber)
+	var business *domain.TaxBusiness
+	var err error
+
+	switch len(regNumber) {
+	case 7:
+		business, err = u.repo.GetBusinessByRegNumber(regNumber)
+	case 13:
+		business, err = u.repo.GetBusinessByOwnerIdentityNumber(regNumber)
+	default:
+		return nil, errors.New("invalid registration number: must be 7 digits (business reg) or 13 digits (identity number)")
+	}
+
 	if err != nil {
 		return nil, err
 	}
@@ -143,7 +154,7 @@ func (u *taxNewUseCase) DeclareTax(req domain.DeclareTaxRequest) (*domain.Declar
 
 	SendNotificationToDepartment(
 		"",
-		"officer",
+		"Employees",
 		"มีรายการยื่นแบบภาษีใหม่",
 		fmt.Sprintf("สถานประกอบการ %s ได้ยื่นแบบภาษี %s รอบประจำเดือน %s %d ยอดภาษีคำนวณ %s บาท รอตอบรับ",
 			business.NameTH, getTaxTypeNameTH(declaration.TaxType), getThaiMonthName(declaration.TaxMonth), declaration.TaxYear+543, formatWithCommas(declaration.CalculatedTax)),

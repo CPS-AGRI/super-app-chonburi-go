@@ -194,6 +194,7 @@ type KTBReconciliationResponse struct {
 
 type TaxNewRepository interface {
 	GetBusinessByRegNumber(regNumber string) (*TaxBusiness, error)
+	GetBusinessByOwnerIdentityNumber(identityNumber string) (*TaxBusiness, error)
 	GetActiveTaxRate(taxType string) (*TaxRate, error)
 	GetLatestDeclarationVersion(regNumber string, taxType string, month, year int) (int, error)
 	CreateDeclaration(declaration *TaxDeclaration) error

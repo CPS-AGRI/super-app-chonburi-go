@@ -31,6 +31,18 @@ func (r *taxNewRepository) GetBusinessByRegNumber(regNumber string) (*domain.Tax
 	return &business, nil
 }
 
+func (r *taxNewRepository) GetBusinessByOwnerIdentityNumber(identityNumber string) (*domain.TaxBusiness, error) {
+	var business domain.TaxBusiness
+	err := r.db.Where("owner_identity_number = ?", identityNumber).First(&business).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &business, nil
+}
+
 func (r *taxNewRepository) GetActiveTaxRate(taxType string) (*domain.TaxRate, error) {
 	var rate domain.TaxRate
 	err := r.db.Where("tax_type = ? AND is_active = ?", taxType, true).First(&rate).Error

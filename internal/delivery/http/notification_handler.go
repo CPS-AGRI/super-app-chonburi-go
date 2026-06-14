@@ -112,6 +112,10 @@ func (h *NotificationHandler) GetNotifications(c fiber.Ctx) error {
 	query := h.db.Model(&domain.ModuleNotification{})
 
 	if adminCount > 0 {
+		// Super admin ไม่ต้องมีแจ้งเตือน
+		if claims.Role == "SuperAdmin" {
+			return SuccessResponse(c, []domain.ModuleNotification{})
+		}
 
 		var admin domain.Admin
 		if err := h.db.Preload("Departments").Where("id = ?", userUUID).First(&admin).Error; err == nil {
@@ -122,15 +126,29 @@ func (h *NotificationHandler) GetNotifications(c fiber.Ctx) error {
 				}
 			}
 
-			if len(deptIDs) > 0 {
-				query = query.Where("type = 'admin' AND (user_admin_id = ? OR department_id IN (?) OR role = ? OR (user_admin_id IS NULL AND department_id IS NULL AND role IS NULL))",
-					userUUID, deptIDs, claims.Role)
+			if claims.Role == "Managers" {
+				// หัวหน้างาน (Managers): เห็นเรื่องของตนเอง และ เรื่องแผนกที่เป็นระดับผู้บริหาร
+				if len(deptIDs) > 0 {
+					query = query.Where("type = 'admin' AND (user_admin_id = ? OR (department_id IN (?) AND role = 'Managers') OR (department_id IS NULL AND role = 'Managers'))",
+						userUUID, deptIDs)
+				} else {
+					query = query.Where("type = 'admin' AND (user_admin_id = ? OR role = 'Managers')",
+						userUUID)
+				}
+			} else if claims.Role == "Employees" {
+				// พนักงานปฏิบัติการ (Employees): เห็นเฉพาะที่รับมอบหมายตรงๆ หรือแบบภาษีในระดับปฏิบัติการ
+				if len(deptIDs) > 0 {
+					query = query.Where("type = 'admin' AND (user_admin_id = ? OR (department_id IN (?) AND role = 'Employees') OR (department_id IS NULL AND role = 'Employees'))",
+						userUUID, deptIDs)
+				} else {
+					query = query.Where("type = 'admin' AND (user_admin_id = ? OR role = 'Employees')",
+						userUUID)
+				}
 			} else {
-				query = query.Where("type = 'admin' AND (user_admin_id = ? OR role = ? OR (user_admin_id IS NULL AND department_id IS NULL AND role IS NULL))",
-					userUUID, claims.Role)
+				query = query.Where("type = 'admin' AND user_admin_id = ?", userUUID)
 			}
 		} else {
-			query = query.Where("type = 'admin'")
+			query = query.Where("type = 'admin' AND user_admin_id = ?", userUUID)
 		}
 	} else {
 
