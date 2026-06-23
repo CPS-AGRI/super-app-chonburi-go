@@ -94,6 +94,9 @@ func (u *authUseCase) Me(id string) (*domain.Admin, []string, error) {
 
 	if admin.Role != nil && admin.Role.Type == "superadmin" {
 		permissions = append(permissions, "MANAGE_CITY", "MANAGE_ADMINS", "MANAGE_DEPARTMENTS", "VIEW_ALL_REPORTS")
+		if keys, err := u.adminRepo.GetAllModuleKeys(); err == nil {
+			permissions = append(permissions, keys...)
+		}
 	}
 
 	uniqueKeys := make(map[string]bool)
