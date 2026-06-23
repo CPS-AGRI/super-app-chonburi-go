@@ -172,6 +172,7 @@ type AdminRepository interface {
 	Create(admin *Admin) error
 	Update(admin *Admin) error
 	Delete(id string) error
+	GetAllModuleKeys() ([]string, error)
 }
 
 type AdminUseCase interface {

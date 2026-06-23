@@ -94,3 +94,9 @@ func (r *adminRepository) Update(admin *domain.Admin) error {
 func (r *adminRepository) Delete(id string) error {
 	return r.db.Delete(&domain.Admin{}, "id = ?", id).Error
 }
+
+func (r *adminRepository) GetAllModuleKeys() ([]string, error) {
+	var keys []string
+	err := r.db.Model(&domain.Module{}).Where("key IS NOT NULL AND key != ''").Pluck("key", &keys).Error
+	return keys, err
+}
