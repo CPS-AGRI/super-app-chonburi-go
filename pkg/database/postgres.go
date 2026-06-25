@@ -74,6 +74,8 @@ func ConnectDB(cfg *config.Config) {
 		&domain.BankReconciliationBatch{},
 		&domain.BankReconciliationRecord{},
 		&domain.ElaasDailySummary{},
+		&domain.CCTV{},
+		&domain.CCTVRequest{},
 	)
 	if err != nil {
 		log.Fatalf("Fatal: Failed to auto-migrate: %v", err)
