@@ -3,6 +3,7 @@ package repository
 import (
 	"errors"
 	"sort"
+	"strings"
 	"super-app-chonburi-go/internal/domain"
 	"time"
 
@@ -147,7 +148,7 @@ func (r *complaintRepository) GetPaginated(query domain.ComplaintQuery) (*domain
 			if complaints[i].User != nil && complaints[i].User.Information != nil {
 				info := *complaints[i].User.Information
 
-				if len(info.IdentityNumberEncrypted) > 4 && info.IdentityNumberEncrypted[:4] == "ENC_" {
+				if strings.HasPrefix(info.IdentityNumberEncrypted, "ENC_") {
 					info.IdentityNumberEncrypted = info.IdentityNumberEncrypted[4:]
 				}
 				complaints[i].UserInformation = &info
@@ -194,7 +195,7 @@ func (r *complaintRepository) GetByID(id string, allowedModuleTypeIDs []string, 
 
 	if err == nil && complaint.User != nil && complaint.User.Information != nil {
 		info := *complaint.User.Information
-		if len(info.IdentityNumberEncrypted) > 4 && info.IdentityNumberEncrypted[:4] == "ENC_" {
+		if strings.HasPrefix(info.IdentityNumberEncrypted, "ENC_") {
 			info.IdentityNumberEncrypted = info.IdentityNumberEncrypted[4:]
 		}
 		complaint.UserInformation = &info
@@ -207,33 +208,30 @@ func (r *complaintRepository) GetByID(id string, allowedModuleTypeIDs []string, 
 		return nil, err
 	}
 
-	if err == nil {
+	if complaint.AssigneeId != nil {
+		var assignee domain.Admin
+		if r.db.Where("id = ?", *complaint.AssigneeId).First(&assignee).Error == nil {
+			complaint.Assignee = &assignee
+		}
+	}
 
-		if complaint.AssigneeId != nil {
-			var assignee domain.Admin
-			if r.db.Where("id = ?", *complaint.AssigneeId).First(&assignee).Error == nil {
-				complaint.Assignee = &assignee
+	if len(complaint.Activities) > 0 {
+		adminIDs := []string{}
+		for _, act := range complaint.Activities {
+			if act.CreatedBy != "" {
+				adminIDs = append(adminIDs, act.CreatedBy)
 			}
 		}
 
-		if len(complaint.Activities) > 0 {
-			adminIDs := []string{}
-			for _, act := range complaint.Activities {
-				if act.CreatedBy != "" {
-					adminIDs = append(adminIDs, act.CreatedBy)
+		if len(adminIDs) > 0 {
+			var admins []domain.Admin
+			if r.db.Where("id IN ?", adminIDs).Find(&admins).Error == nil {
+				adminMap := make(map[string]*domain.Admin)
+				for i := range admins {
+					adminMap[admins[i].ID] = &admins[i]
 				}
-			}
-
-			if len(adminIDs) > 0 {
-				var admins []domain.Admin
-				if r.db.Where("id IN ?", adminIDs).Find(&admins).Error == nil {
-					adminMap := make(map[string]*domain.Admin)
-					for i := range admins {
-						adminMap[admins[i].ID] = &admins[i]
-					}
-					for i := range complaint.Activities {
-						complaint.Activities[i].Admin = adminMap[complaint.Activities[i].CreatedBy]
-					}
+				for i := range complaint.Activities {
+					complaint.Activities[i].Admin = adminMap[complaint.Activities[i].CreatedBy]
 				}
 			}
 		}

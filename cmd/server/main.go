@@ -73,6 +73,7 @@ func main() {
 	taxNewRepo := repository.NewTaxNewRepository(database.DB)
 	publicRelationRepo := repository.NewPublicRelationRepository(database.DB)
 	verificationRepo := repository.NewVerificationRepository(database.DB)
+	cctvRepo := repository.NewCCTVRepository(database.DB)
 
 	emailSender := mail.NewSMTPEmailSender(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPEmail, cfg.SMTPPassword)
 	storageProvider := storage.NewMinIOStorage(minioClient)
@@ -91,6 +92,10 @@ func main() {
 	taxNewUC := usecase.NewTaxNewUseCase(taxNewRepo, emailSender, "")
 	publicRelationUC := usecase.NewPublicRelationUseCase(publicRelationRepo, adminRepo, storageProvider)
 	verificationUC := usecase.NewVerificationUseCase(verificationRepo)
+	cctvUC := usecase.NewCCTVUseCase(cctvRepo)
+
+	// Start CCTV Snapshot Background Worker
+	usecase.StartSnapshotWorker(database.DB, storageProvider)
 
 	authHandler := delivery.NewAuthHandler(authUC)
 	uploadHandler := delivery.NewUploadHandler(minioClient, cfg.MinIO)
@@ -107,6 +112,7 @@ func main() {
 	taxNewHandler := delivery.NewTaxNewHandler(taxNewUC, storageProvider)
 	publicRelationHandler := delivery.NewPublicRelationHandler(publicRelationUC)
 	verificationHandler := delivery.NewVerificationHandler(verificationUC)
+	cctvHandler := delivery.NewCCTVHandler(cctvUC)
 
 	fcmWorkerPool := usecase.InitGlobalFCMWorkerPool(1000, 5)
 	notificationHandler := delivery.NewNotificationHandler(database.DB, fcmWorkerPool)
@@ -129,6 +135,7 @@ func main() {
 	publicRelationHandler.RegisterRoutes(api)
 	publicRelationHandler.RegisterGlobalRoutes(api)
 	verificationHandler.RegisterRoutes(api)
+	cctvHandler.RegisterRoutes(api)
 	notificationHandler.RegisterRoutes(api)
 
 	port := ":" + cfg.AppPort
