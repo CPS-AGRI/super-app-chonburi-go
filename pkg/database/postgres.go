@@ -56,6 +56,7 @@ func ConnectDB(cfg *config.Config) {
 		&domain.MunicipalityWorkSchedule{},
 		&domain.AppUser{},
 		&domain.UserInformation{},
+		&domain.UserOauthAccount{},
 		&domain.UserActivityTracking{},
 		&domain.PublicRelation{},
 		&domain.PublicRelationVisitorCount{},
