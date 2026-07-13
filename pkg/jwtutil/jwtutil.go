@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"super-app-chonburi-go/internal/domain"
+
 	"github.com/gofiber/fiber/v3"
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -27,12 +28,42 @@ func secretKey() []byte {
 }
 
 func GenerateToken(user domain.User) (string, error) {
+
+	name := ""
+	permissions := []string{}
+	if admin, ok := user.(*domain.Admin); ok {
+		name = admin.Name + " " + admin.LastName
+
+		if admin.Role != nil && (admin.Role.Type == "superadmin" || admin.Role.Type == "super_admin") {
+			permissions = append(permissions, "MANAGE_CITY", "MANAGE_ADMINS", "MANAGE_DEPARTMENTS", "VIEW_ALL_REPORTS")
+		}
+
+		uniqueKeys := make(map[string]bool)
+		for _, dept := range admin.Departments {
+			for _, module := range dept.Modules {
+				if module.Key != nil && *module.Key != "" {
+					uniqueKeys[*module.Key] = true
+				}
+
+				if module.ID == "d01b2ce5-34a9-498b-bba0-b1b8360f1ea9" ||
+					module.NameTh == "ศูนย์ร้องทุกข์" ||
+					module.NameEn == "Complaint Center" {
+					uniqueKeys["ModuleComplaintCenter"] = true
+				}
+			}
+		}
+
+		for key := range uniqueKeys {
+			permissions = append(permissions, key)
+		}
+	}
+
 	claims := CustomClaims{
-		ID:          user.ID,
-		Email:       user.Email,
-		Name:        user.Name,
-		Role:        user.Role,
-		Permissions: user.Permissions,
+		ID:          user.GetID(),
+		Email:       user.GetEmail(),
+		Name:        name,
+		Role:        user.GetRole(),
+		Permissions: permissions,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),

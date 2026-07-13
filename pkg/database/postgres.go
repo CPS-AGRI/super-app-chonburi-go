@@ -18,7 +18,7 @@ func ConnectDB(cfg *config.Config) {
 	var err error
 
 	DB, err = gorm.Open(postgres.Open(cfg.DBDsn), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Silent),
+		Logger: logger.Default.LogMode(logger.Info),
 	})
 
 	if err != nil {
@@ -36,14 +36,53 @@ func ConnectDB(cfg *config.Config) {
 
 	DB.Exec("CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\"")
 
+	log.Println("Migrating fresh MueangSmart schema (snake_case)...")
 	err = DB.AutoMigrate(
-		&domain.AdminDepartment{},
+		&domain.AdminRole{},
 		&domain.Admin{},
+		&domain.AdminRefreshToken{},
+		&domain.Department{},
+		&domain.Module{},
+		&domain.ModuleType{},
+		&domain.DepartmentModule{},
+		&domain.DepartmentModuleModuleType{},
+		&domain.Complaint{},
+		&domain.ComplaintImage{},
+		&domain.ComplaintActivity{},
+		&domain.ComplaintActivityImage{},
+		&domain.ComplaintRatingHistory{},
 		&domain.Municipality{},
+		&domain.MunicipalityBank{},
+		&domain.MunicipalityWorkSchedule{},
+		&domain.AppUser{},
+		&domain.UserInformation{},
+		&domain.UserOauthAccount{},
+		&domain.UserActivityTracking{},
+		&domain.PublicRelation{},
+		&domain.PublicRelationVisitorCount{},
+		&domain.PublicRelationNotification{},
+		&domain.PublicRelationLike{},
+		&domain.PublicRelationImage{},
+		&domain.PublicRelationComment{},
+		&domain.MunicipalityWelcomeScreen{},
+		&domain.ModuleNotification{},
+		&domain.ModuleUserNotification{},
+		&domain.ModuleDeviceToken{},
+		&domain.UserFCMToken{},
+		&domain.TaxRate{},
+		&domain.TaxBusiness{},
+		&domain.TaxDeclaration{},
+		&domain.BankReconciliationBatch{},
+		&domain.BankReconciliationRecord{},
+		&domain.ElaasDailySummary{},
+		&domain.CCTV{},
+		&domain.CCTVRequest{},
 	)
 	if err != nil {
 		log.Fatalf("Fatal: Failed to auto-migrate: %v", err)
 	}
 
-	log.Println("Database Connected & Migrated")
+	Seed()
+
+	log.Println("Database initialized and seeded successfully.")
 }

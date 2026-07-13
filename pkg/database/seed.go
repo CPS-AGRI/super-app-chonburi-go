@@ -3,115 +3,125 @@ package database
 import (
 	"log"
 	"super-app-chonburi-go/internal/domain"
-
-	"github.com/google/uuid"
-	"golang.org/x/crypto/bcrypt"
 )
 
 func Seed() {
-	var count int64
-	DB.Model(&domain.Admin{}).Count(&count)
-	if count > 0 {
-		return
-	}
+	log.Println("Running database seeding...")
+	seedTaxRates()
+	seedTaxBusinesses()
+}
 
-	log.Println("🌱 Seeding initial data...")
-
-	superAdminDeptID := uuid.New()
-	supervisorDeptID := uuid.New()
-	employeeDeptID := uuid.New()
-
-	departments := []domain.AdminDepartment{
+func seedTaxRates() {
+	rates := []domain.TaxRate{
 		{
-			ID:   superAdminDeptID,
-			Name: "superadmin",
-			Permissions: []string{
-				"MANAGE_CITY_SETTINGS",
-			},
+			TaxType:   "hotel_fee",
+			NameTH:    "ค่าธรรมเนียมบำรุง อบจ. จากผู้เข้าพักโรงแรม",
+			RateValue: 0.5,
+			RateUnit:  "percentage",
+			IsActive:  true,
 		},
 		{
-			ID:   supervisorDeptID,
-			Name: "supervisor",
-			Permissions: []string{
-				"MANAGE_COMPLAINTS",
-				"MANAGE_TAXES",
-				"MANAGE_PUBLIC_RELATIONS",
-				"VERIFY_CITIZENS",
-				"MANAGE_WEATHER_ALERTS",
-			},
+			TaxType:   "oil_gas_tax",
+			NameTH:    "ภาษีบำรุง อบจ.จากการค้าน้ำมัน/ก๊าซ",
+			RateValue: 4.54,
+			RateUnit:  "percentage",
+			IsActive:  true,
 		},
 		{
-			ID:   employeeDeptID,
-			Name: "employee",
-			Permissions: []string{
-				"MANAGE_COMPLAINTS",
-				"MANAGE_TAXES",
-				"MANAGE_PUBLIC_RELATIONS",
-				"VERIFY_CITIZENS",
-				"MANAGE_WEATHER_ALERTS",
-			},
+			TaxType:   "tobacco_tax",
+			NameTH:    "ภาษีบำรุง อบจ.จากการค้ายาสูบ",
+			RateValue: 1.0,
+			RateUnit:  "percentage",
+			IsActive:  true,
 		},
 	}
 
-	for i := range departments {
-		DB.FirstOrCreate(&departments[i], domain.AdminDepartment{Name: departments[i].Name})
-	}
+	for _, rate := range rates {
+		var existing domain.TaxRate
+		err := DB.Where("tax_type = ?", rate.TaxType).First(&existing).Error
+		if err != nil {
 
-	hashedPassword, _ := bcrypt.GenerateFromPassword([]byte("password123"), bcrypt.DefaultCost)
-
-	admins := []domain.Admin{
-		{
-			ID:           uuid.New(),
-			Email:        "super@admin.com",
-			Name:         "Super Admin",
-			PhoneNumber:  "0812345678",
-			PasswordHash: string(hashedPassword),
-			DepartmentID: superAdminDeptID,
-		},
-		{
-			ID:           uuid.New(),
-			Email:        "head@admin.com",
-			Name:         "Head Admin",
-			PhoneNumber:  "0823456789",
-			PasswordHash: string(hashedPassword),
-			DepartmentID: supervisorDeptID,
-		},
-		{
-			ID:           uuid.New(),
-			Email:        "staff@admin.com",
-			Name:         "Staff Admin",
-			PhoneNumber:  "0834567890",
-			PasswordHash: string(hashedPassword),
-			DepartmentID: employeeDeptID,
-		},
-	}
-
-	for i := range admins {
-		DB.FirstOrCreate(&admins[i], domain.Admin{Email: admins[i].Email})
-	}
-
-	var muniCount int64
-	DB.Model(&domain.Municipality{}).Count(&muniCount)
-	if muniCount == 0 {
-		muni := domain.Municipality{
-			ID:            uuid.New(),
-			CityNameTh:    "องค์การบริหารส่วนจังหวัดชลบุรี",
-			CityNameEn:    "Chonburi Provincial Administrative Organization",
-			CityAddressTh: "เลขที่ 999 หมู่ที่ 3 ตำบลเสม็ด อำเภอเมืองชลบุรี จังหวัดชลบุรี 20130",
-			CityAddressEn: "999 Moo 3, Samet, Mueang Chonburi, Chonburi 20130",
-			CityPhone:     "038-398039",
-			CityLogoUrl:   "/logo.webp",
-			CityLat:       13.3611,
-			CityLng:       100.9847,
-			Status:        "active",
-			CreatedBy:     "system",
-		}
-		if err := DB.Create(&muni).Error; err != nil {
-			log.Printf("⚠️ Warning: Failed to seed municipality: %v", err)
+			if err := DB.Create(&rate).Error; err != nil {
+				log.Printf("Failed to seed tax rate %s: %v", rate.TaxType, err)
+			} else {
+				log.Printf("Seeded tax rate: %s", rate.TaxType)
+			}
 		} else {
-			log.Println("✅ Seeded Municipality successfully")
+			log.Printf("Tax rate %s already exists, skipping.", rate.TaxType)
 		}
 	}
+}
 
-	log.Println("✅ Seed completed")
+func seedTaxBusinesses() {
+	businesses := []domain.TaxBusiness{
+		{
+			BusinessRegNumber: "1234567",
+			NameTH:            "โรงแรมชลบุรี แกรนด์ พลาซ่า",
+			TaxType:           "hotel_fee",
+		},
+		{
+			BusinessRegNumber: "7654321",
+			NameTH:            "สถานีบริการน้ำมันชลบุรีพลังงาน",
+			TaxType:           "oil_gas_tax",
+		},
+		{
+			BusinessRegNumber: "9999999",
+			NameTH:            "ร้านค้าส่งยาสูบชลบุรี",
+			TaxType:           "tobacco_tax",
+		},
+	}
+
+	nameEN1 := "Chonburi Grand Plaza Hotel"
+	owner1 := "นายสมชาย ใจดี"
+	id1 := "1100100123456"
+	phone1 := "0812345678"
+	email1 := "somchai@example.com"
+	addr1 := "123 หมู่ 1 ต.เสม็ด อ.เมืองชลบุรี จ.ชลบุรี 20000"
+	businesses[0].NameEN = &nameEN1
+	businesses[0].OwnerName = &owner1
+	businesses[0].OwnerIdentityNumber = &id1
+	businesses[0].ContactPhone = &phone1
+	businesses[0].ContactEmail = &email1
+	businesses[0].AddressDetail = &addr1
+
+	nameEN2 := "Chonburi Energy Gas Station"
+	owner2 := "นางสาวสมศรี สวยงาม"
+	id2 := "1100100654321"
+	phone2 := "0898765432"
+	email2 := "somsri@example.com"
+	addr2 := "456 ต.แสนสุข อ.เมืองชลบุรี จ.ชลบุรี 20130"
+	businesses[1].NameEN = &nameEN2
+	businesses[1].OwnerName = &owner2
+	businesses[1].OwnerIdentityNumber = &id2
+	businesses[1].ContactPhone = &phone2
+	businesses[1].ContactEmail = &email2
+	businesses[1].AddressDetail = &addr2
+
+	nameEN3 := "Chonburi Tobacco Wholesaler"
+	owner3 := "นายประหยัด มัธยัสถ์"
+	id3 := "1100100999999"
+	phone3 := "0867890123"
+	email3 := "prayad@example.com"
+	addr3 := "789 ต.บ้านสวน อ.เมืองชลบุรี จ.ชลบุรี 20000"
+	businesses[2].NameEN = &nameEN3
+	businesses[2].OwnerName = &owner3
+	businesses[2].OwnerIdentityNumber = &id3
+	businesses[2].ContactPhone = &phone3
+	businesses[2].ContactEmail = &email3
+	businesses[2].AddressDetail = &addr3
+
+	for _, biz := range businesses {
+		var existing domain.TaxBusiness
+		err := DB.Where("business_reg_number = ?", biz.BusinessRegNumber).First(&existing).Error
+		if err != nil {
+
+			if err := DB.Create(&biz).Error; err != nil {
+				log.Printf("Failed to seed tax business %s: %v", biz.BusinessRegNumber, err)
+			} else {
+				log.Printf("Seeded tax business: %s (%s)", biz.NameTH, biz.BusinessRegNumber)
+			}
+		} else {
+			log.Printf("Tax business %s already exists, skipping.", biz.BusinessRegNumber)
+		}
+	}
 }
