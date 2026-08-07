@@ -17,8 +17,13 @@ var DB *gorm.DB
 func ConnectDB(cfg *config.Config) {
 	var err error
 
+	gormLogLevel := logger.Error
+	if cfg.AppEnv == "development" {
+		gormLogLevel = logger.Info
+	}
+
 	DB, err = gorm.Open(postgres.Open(cfg.DBDsn), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Info),
+		Logger: logger.Default.LogMode(gormLogLevel),
 	})
 
 	if err != nil {
@@ -36,53 +41,54 @@ func ConnectDB(cfg *config.Config) {
 
 	DB.Exec("CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\"")
 
-	log.Println("Migrating fresh MueangSmart schema (snake_case)...")
-	err = DB.AutoMigrate(
-		&domain.AdminRole{},
-		&domain.Admin{},
-		&domain.AdminRefreshToken{},
-		&domain.Department{},
-		&domain.Module{},
-		&domain.ModuleType{},
-		&domain.DepartmentModule{},
-		&domain.DepartmentModuleModuleType{},
-		&domain.Complaint{},
-		&domain.ComplaintImage{},
-		&domain.ComplaintActivity{},
-		&domain.ComplaintActivityImage{},
-		&domain.ComplaintRatingHistory{},
-		&domain.Municipality{},
-		&domain.MunicipalityBank{},
-		&domain.MunicipalityWorkSchedule{},
-		&domain.AppUser{},
-		&domain.UserInformation{},
-		&domain.UserOauthAccount{},
-		&domain.UserActivityTracking{},
-		&domain.PublicRelation{},
-		&domain.PublicRelationVisitorCount{},
-		&domain.PublicRelationNotification{},
-		&domain.PublicRelationLike{},
-		&domain.PublicRelationImage{},
-		&domain.PublicRelationComment{},
-		&domain.MunicipalityWelcomeScreen{},
-		&domain.ModuleNotification{},
-		&domain.ModuleUserNotification{},
-		&domain.ModuleDeviceToken{},
-		&domain.UserFCMToken{},
-		&domain.TaxRate{},
-		&domain.TaxBusiness{},
-		&domain.TaxDeclaration{},
-		&domain.BankReconciliationBatch{},
-		&domain.BankReconciliationRecord{},
-		&domain.ElaasDailySummary{},
-		&domain.CCTV{},
-		&domain.CCTVRequest{},
-	)
-	if err != nil {
-		log.Fatalf("Fatal: Failed to auto-migrate: %v", err)
+	if cfg.AppEnv != "production" {
+		log.Println("Migrating MueangSmart schema (snake_case)...")
+		err = DB.AutoMigrate(
+			&domain.AdminRole{},
+			&domain.Admin{},
+			&domain.AdminRefreshToken{},
+			&domain.Department{},
+			&domain.Module{},
+			&domain.ModuleType{},
+			&domain.DepartmentModule{},
+			&domain.DepartmentModuleModuleType{},
+			&domain.Complaint{},
+			&domain.ComplaintImage{},
+			&domain.ComplaintActivity{},
+			&domain.ComplaintActivityImage{},
+			&domain.ComplaintRatingHistory{},
+			&domain.Municipality{},
+			&domain.MunicipalityBank{},
+			&domain.MunicipalityWorkSchedule{},
+			&domain.AppUser{},
+			&domain.UserInformation{},
+			&domain.UserOauthAccount{},
+			&domain.UserActivityTracking{},
+			&domain.PublicRelation{},
+			&domain.PublicRelationVisitorCount{},
+			&domain.PublicRelationNotification{},
+			&domain.PublicRelationLike{},
+			&domain.PublicRelationImage{},
+			&domain.PublicRelationComment{},
+			&domain.MunicipalityWelcomeScreen{},
+			&domain.ModuleNotification{},
+			&domain.ModuleUserNotification{},
+			&domain.ModuleDeviceToken{},
+			&domain.UserFCMToken{},
+			&domain.TaxRate{},
+			&domain.TaxBusiness{},
+			&domain.TaxDeclaration{},
+			&domain.BankReconciliationBatch{},
+			&domain.BankReconciliationRecord{},
+			&domain.ElaasDailySummary{},
+			&domain.CCTV{},
+			&domain.CCTVRequest{},
+		)
+		if err != nil {
+			log.Fatalf("Fatal: Failed to auto-migrate: %v", err)
+		}
+	} else {
+		log.Println("Production environment detected: Skipping AutoMigrate.")
 	}
-
-	Seed()
-
-	log.Println("Database initialized and seeded successfully.")
+	log.Println("Database initialized successfully.")
 }

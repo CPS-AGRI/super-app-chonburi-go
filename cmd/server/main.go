@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"strings"
 	"time"
 
 	"super-app-chonburi-go/config"
@@ -10,6 +11,7 @@ import (
 	"super-app-chonburi-go/internal/usecase"
 	"super-app-chonburi-go/pkg/database"
 	"super-app-chonburi-go/pkg/mail"
+	"super-app-chonburi-go/pkg/redis"
 	"super-app-chonburi-go/pkg/storage"
 	minioStorage "super-app-chonburi-go/pkg/storage/minio"
 
@@ -26,6 +28,7 @@ func main() {
 	cfg := config.LoadConfig()
 
 	database.ConnectDB(cfg)
+	redis.ConnectRedis(cfg)
 
 	minioClient, err := minioStorage.NewClient(cfg.MinIO)
 	if err != nil {
@@ -45,17 +48,35 @@ func main() {
 	app.Use(compress.New(compress.Config{
 		Level: compress.LevelBestSpeed,
 	}))
-	app.Use(logger.New())
+	if cfg.AppEnv == "production" {
+		app.Use(logger.New(logger.Config{
+			Format: `{"time":"${time}","status":${status},"latency":"${latency}","ip":"${ip}","method":"${method}","path":"${path}"}` + "\n",
+		}))
+	} else {
+		app.Use(logger.New())
+	}
 
 	app.Get("/", func(c fiber.Ctx) error {
 		return c.SendString("Super App Chonburi API (MueangSmart Core) is running...")
 	})
 
 	app.Get("/uploads/*", static.New("./uploads"))
+	origins := strings.Split(cfg.CORSAllowedOrigins, ",")
+	for i := range origins {
+		origins[i] = strings.TrimSpace(origins[i])
+	}
+
 	app.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"http://localhost:3000", "http://localhost:3001", "http://localhost:5173"},
-		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization"},
-		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowOriginsFunc: func(origin string) bool {
+			for _, o := range origins {
+				if o == "*" || o == origin {
+					return true
+				}
+			}
+			return false
+		},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization", "X-Requested-With"},
+		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowCredentials: true,
 	}))
 

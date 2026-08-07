@@ -3,6 +3,7 @@ package usecase
 import (
 	"context"
 	"log"
+	"os"
 	"sync"
 	"time"
 
@@ -41,19 +42,27 @@ func InitGlobalFCMWorkerPool(queueSize int, workerCount int) *FCMWorkerPool {
 		cancel:      cancel,
 	}
 
-	opt := option.WithCredentialsFile("firebase-service-account.json")
-	app, err := firebase.NewApp(ctx, nil, opt)
-	if err != nil {
-		log.Fatalf("[FCM-WorkerPool] ข้อผิดพลาดร้ายแรง: ไม่สามารถเริ่มตัว Firebase App ได้ (%v)", err)
-	}
-
-	client, err := app.Messaging(ctx)
-	if err != nil {
-		log.Fatalf("[FCM-WorkerPool] ข้อผิดพลาดร้ายแรง: ไม่สามารถสร้าง Messaging Client ได้ (%v)", err)
+	var client *messaging.Client
+	// Check if firebase-service-account.json exists
+	if _, err := os.Stat("firebase-service-account.json"); err == nil {
+		opt := option.WithCredentialsFile("firebase-service-account.json")
+		app, err := firebase.NewApp(ctx, nil, opt)
+		if err != nil {
+			log.Printf("[FCM-WorkerPool] ⚠️ คำเตือน: ไม่สามารถเริ่มตัว Firebase App ได้ (%v)", err)
+		} else {
+			c, err := app.Messaging(ctx)
+			if err != nil {
+				log.Printf("[FCM-WorkerPool] ⚠️ คำเตือน: ไม่สามารถสร้าง Messaging Client ได้ (%v)", err)
+			} else {
+				client = c
+				log.Println("[FCM-WorkerPool] เชื่อมต่อกับ Google FCM API จริงสำเร็จ (Strict Live Mode)")
+			}
+		}
+	} else {
+		log.Println("[FCM-WorkerPool] ⚠️ คำเตือน: ไม่พบไฟล์ firebase-service-account.json, ระบบจะทำงานในโหมด MOCK PUSH (Dry-Run)")
 	}
 
 	pool.fcmClient = client
-	log.Println("[FCM-WorkerPool] เชื่อมต่อกับ Google FCM API จริงสำเร็จ (Strict Live Mode)")
 
 	GlobalFCMWorkerPool = pool
 	pool.Start()
@@ -124,6 +133,12 @@ func (p *FCMWorkerPool) Submit(payload FCMPayload) bool {
 
 func (p *FCMWorkerPool) sendFCM(workerID int, payload FCMPayload) {
 	startTime := time.Now()
+
+	if p.fcmClient == nil {
+		log.Printf("[FCM-Worker-%d] 📱 [FCM MOCK PUSH] ส่งแจ้งเตือนจำลองสำเร็จ (Mock Mode) -> หัวข้อ: %s, เนื้อหา: %s, จำนวนอุปกรณ์: %d",
+			workerID, payload.Title, payload.Body, len(payload.Tokens))
+		return
+	}
 
 	for _, token := range payload.Tokens {
 		msg := &messaging.Message{

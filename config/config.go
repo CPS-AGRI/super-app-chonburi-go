@@ -9,6 +9,7 @@ import (
 )
 
 type Config struct {
+	AppEnv       string
 	AppPort      string
 	DBDsn        string
 	OrgName      string
@@ -16,8 +17,16 @@ type Config struct {
 	SMTPHost     string
 	SMTPPort     string
 	SMTPEmail    string
-	SMTPPassword string
-	MinIO        MinIOConfig
+	SMTPPassword       string
+	CORSAllowedOrigins string
+	MinIO              MinIOConfig
+	Redis              RedisConfig
+}
+
+type RedisConfig struct {
+	Host     string
+	Port     string
+	Password string
 }
 
 type MinIOConfig struct {
@@ -97,15 +106,36 @@ func LoadConfig() *Config {
 	smtpEmail := os.Getenv("SMTP_EMAIL")
 	smtpPassword := os.Getenv("SMTP_PASSWORD")
 
+	appEnv := os.Getenv("APP_ENV")
+	if appEnv == "" {
+		appEnv = "development"
+	}
+
+	redisHost := os.Getenv("REDIS_HOST")
+	if redisHost == "" {
+		redisHost = "127.0.0.1"
+	}
+	redisPort := os.Getenv("REDIS_PORT")
+	if redisPort == "" {
+		redisPort = "6379"
+	}
+	redisPassword := os.Getenv("REDIS_PASSWORD")
+	corsAllowedOrigins := os.Getenv("CORS_ALLOWED_ORIGINS")
+	if corsAllowedOrigins == "" {
+		corsAllowedOrigins = "http://localhost:3000,http://localhost:3001,http://localhost:5173,https://uat-super-app-chonburi.mueangsmart.com"
+	}
+
 	return &Config{
-		AppPort:      port,
-		DBDsn:        dsn,
-		OrgName:      orgName,
-		OrgLogoURL:   orgLogoURL,
-		SMTPHost:     smtpHost,
-		SMTPPort:     smtpPort,
-		SMTPEmail:    smtpEmail,
-		SMTPPassword: smtpPassword,
+		AppEnv:             appEnv,
+		AppPort:            port,
+		DBDsn:              dsn,
+		OrgName:            orgName,
+		OrgLogoURL:         orgLogoURL,
+		SMTPHost:           smtpHost,
+		SMTPPort:           smtpPort,
+		SMTPEmail:          smtpEmail,
+		SMTPPassword:       smtpPassword,
+		CORSAllowedOrigins: corsAllowedOrigins,
 		MinIO: MinIOConfig{
 			Endpoint:        minioEndpoint,
 			AccessKey:       minioAccessKey,
@@ -117,6 +147,11 @@ func LoadConfig() *Config {
 			PublicBaseURL:   minioPublicBaseURL,
 			PresignURLTTL:   minioPresignURLTTL,
 			MaxUploadSizeMB: minioMaxUploadSizeMB,
+		},
+		Redis: RedisConfig{
+			Host:     redisHost,
+			Port:     redisPort,
+			Password: redisPassword,
 		},
 	}
 }
