@@ -2,6 +2,7 @@ package jwtutil
 
 import (
 	"os"
+	"strings"
 	"time"
 
 	"super-app-chonburi-go/internal/domain"
@@ -34,7 +35,7 @@ func GenerateToken(user domain.User) (string, error) {
 	if admin, ok := user.(*domain.Admin); ok {
 		name = admin.Name + " " + admin.LastName
 
-		if admin.Role != nil && (admin.Role.Type == "superadmin" || admin.Role.Type == "super_admin") {
+		if admin.Role != nil && (strings.EqualFold(admin.Role.Type, "superadmin") || strings.EqualFold(admin.Role.Type, "super_admin")) {
 			permissions = append(permissions, "MANAGE_CITY", "MANAGE_ADMINS", "MANAGE_DEPARTMENTS", "VIEW_ALL_REPORTS")
 		}
 
