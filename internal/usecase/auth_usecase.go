@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"errors"
+	"strings"
 	"super-app-chonburi-go/internal/domain"
 	"super-app-chonburi-go/pkg/jwtutil"
 	"time"
@@ -92,11 +93,8 @@ func (u *authUseCase) Me(id string) (*domain.Admin, []string, error) {
 
 	permissions := []string{}
 
-	if admin.Role != nil && admin.Role.Type == "superadmin" {
+	if admin.Role != nil && (strings.EqualFold(admin.Role.Type, "superadmin") || strings.EqualFold(admin.Role.Type, "super_admin")) {
 		permissions = append(permissions, "MANAGE_CITY", "MANAGE_ADMINS", "MANAGE_DEPARTMENTS", "VIEW_ALL_REPORTS")
-		if keys, err := u.adminRepo.GetAllModuleKeys(); err == nil {
-			permissions = append(permissions, keys...)
-		}
 	}
 
 	uniqueKeys := make(map[string]bool)
