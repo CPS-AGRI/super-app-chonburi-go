@@ -168,9 +168,12 @@ func NewUUID() string {
 type AdminRepository interface {
 	GetByEmail(email string) (*Admin, error)
 	GetByID(id string) (*Admin, error)
+	GetByVerifyRegistrationToken(token string) (*Admin, error)
+	GetByVerifyForgotPasswordToken(token string) (*Admin, error)
 	GetPaginated(query AdminQuery) (*PaginatedAdminResponse, error)
 	Create(admin *Admin) error
 	Update(admin *Admin) error
+	UpdateFields(id string, fields map[string]interface{}) error
 	Delete(id string) error
 	GetAllModuleKeys() ([]string, error)
 }
@@ -265,6 +268,19 @@ type AuthUseCase interface {
 	RefreshToken(token string) (string, string, User, error)
 	Logout(token string) error
 	Me(id string) (*Admin, []string, error)
+	ForgotPassword(email string) error
+	VerifyToken(token, tokenType string) (*Admin, error)
+	ResetPassword(token, newPassword, tokenType string) error
+}
+
+type ForgotPasswordRequest struct {
+	Email string `json:"email" validate:"required,email"`
+}
+
+type ResetPasswordRequest struct {
+	Token     string `json:"token" validate:"required"`
+	Password  string `json:"password" validate:"required,min=8"`
+	TokenType string `json:"type"` // "activation" or "reset"
 }
 
 type LoginRequest struct {

@@ -4,6 +4,7 @@ import (
 	"super-app-chonburi-go/internal/domain"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type adminRepository struct {
@@ -40,6 +41,24 @@ func (r *adminRepository) GetByID(id string) (*domain.Admin, error) {
 	return &admin, nil
 }
 
+func (r *adminRepository) GetByVerifyRegistrationToken(token string) (*domain.Admin, error) {
+	var admin domain.Admin
+	err := r.db.Where("verify_registration_token = ? AND verify_registration_token != ''", token).First(&admin).Error
+	if err != nil {
+		return nil, err
+	}
+	return &admin, nil
+}
+
+func (r *adminRepository) GetByVerifyForgotPasswordToken(token string) (*domain.Admin, error) {
+	var admin domain.Admin
+	err := r.db.Where("verify_forgot_password_token = ?", token).First(&admin).Error
+	if err != nil {
+		return nil, err
+	}
+	return &admin, nil
+}
+
 func (r *adminRepository) GetPaginated(query domain.AdminQuery) (*domain.PaginatedAdminResponse, error) {
 	var admins []domain.Admin
 	var total int64
@@ -70,25 +89,32 @@ func (r *adminRepository) GetPaginated(query domain.AdminQuery) (*domain.Paginat
 }
 
 func (r *adminRepository) Create(admin *domain.Admin) error {
-
 	return r.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Create(admin).Error; err != nil {
+		if err := tx.Omit(clause.Associations).Create(admin).Error; err != nil {
 			return err
 		}
 
-		return tx.Model(admin).Association("Departments").Replace(admin.Departments)
+		if len(admin.Departments) > 0 {
+			return tx.Model(admin).Association("Departments").Replace(admin.Departments)
+		}
+		return nil
 	})
 }
 
 func (r *adminRepository) Update(admin *domain.Admin) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
-
-		if err := tx.Model(admin).Association("Departments").Replace(admin.Departments); err != nil {
-			return err
+		if len(admin.Departments) > 0 {
+			if err := tx.Model(admin).Association("Departments").Replace(admin.Departments); err != nil {
+				return err
+			}
 		}
 
-		return tx.Save(admin).Error
+		return tx.Omit(clause.Associations).Save(admin).Error
 	})
+}
+
+func (r *adminRepository) UpdateFields(id string, fields map[string]interface{}) error {
+	return r.db.Model(&domain.Admin{}).Where("id = ?", id).Updates(fields).Error
 }
 
 func (r *adminRepository) Delete(id string) error {

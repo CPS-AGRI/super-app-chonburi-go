@@ -13,6 +13,7 @@ type Config struct {
 	DBDsn        string
 	OrgName      string
 	OrgLogoURL   string
+	FrontendURL  string
 	SMTPHost     string
 	SMTPPort     string
 	SMTPEmail    string
@@ -89,6 +90,11 @@ func LoadConfig() *Config {
 	minioPresignURLTTL := getEnvInt("MINIO_PRESIGN_URL_TTL_SECONDS", 3600)
 	minioMaxUploadSizeMB := int64(getEnvInt("MINIO_MAX_UPLOAD_SIZE_MB", 10))
 
+	frontendURL := os.Getenv("FRONTEND_URL")
+	if frontendURL == "" {
+		frontendURL = "http://localhost:3000"
+	}
+
 	smtpHost := os.Getenv("SMTP_HOST")
 	smtpPort := os.Getenv("SMTP_PORT")
 	if smtpPort == "" {
@@ -102,6 +108,7 @@ func LoadConfig() *Config {
 		DBDsn:        dsn,
 		OrgName:      orgName,
 		OrgLogoURL:   orgLogoURL,
+		FrontendURL:  frontendURL,
 		SMTPHost:     smtpHost,
 		SMTPPort:     smtpPort,
 		SMTPEmail:    smtpEmail,

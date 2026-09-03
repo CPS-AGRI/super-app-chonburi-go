@@ -66,7 +66,7 @@ func (h *AdminHandler) CreateAdmin(c fiber.Ctx) error {
 
 	if err := h.adminUseCase.CreateAdmin(&admin); err != nil {
 		if err.Error() == "email already exists" {
-			return c.Status(fiber.StatusConflict).JSON(fiber.Map{"error": err.Error()})
+			return c.Status(fiber.StatusConflict).JSON(fiber.Map{"error": "อีเมลนี้มีอยู่ในระบบแล้ว กรุณาใช้อีเมลอื่น"})
 		}
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}

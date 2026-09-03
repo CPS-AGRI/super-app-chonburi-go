@@ -78,8 +78,8 @@ func main() {
 	emailSender := mail.NewSMTPEmailSender(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPEmail, cfg.SMTPPassword)
 	storageProvider := storage.NewMinIOStorage(minioClient)
 
-	authUC := usecase.NewAuthUseCase(adminRepo, rtRepo)
-	adminUC := usecase.NewAdminUseCase(adminRepo)
+	authUC := usecase.NewAuthUseCase(adminRepo, rtRepo, emailSender, cfg.FrontendURL)
+	adminUC := usecase.NewAdminUseCase(adminRepo, emailSender, cfg.FrontendURL)
 	adminRoleUC := usecase.NewAdminRoleUseCase(adminRoleRepo)
 	deptUC := usecase.NewDepartmentUseCase(deptRepo)
 	complaintUC := usecase.NewComplaintUseCase(complaintRepo, adminRepo, muniRepo)
