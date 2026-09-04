@@ -1,14 +1,16 @@
 package http
 
 import (
+	"log"
 	"strconv"
 	"strings"
+	"time"
+
 	"super-app-chonburi-go/internal/domain"
 	"super-app-chonburi-go/pkg/jwtutil"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
-	"time"
 )
 
 type CCTVHandler struct {
@@ -29,6 +31,9 @@ func (h *CCTVHandler) RegisterRoutes(router fiber.Router) {
 	group.Get("/requests", h.GetRequests)
 	group.Put("/requests/:id/approve", h.ApproveRequest)
 	group.Put("/requests/:id/reject", h.RejectRequest)
+	group.Post("/logs", h.CreateViewLog)
+	group.Get("/logs/recent", h.GetRecentLogs)
+	group.Get("/logs/summary", h.GetUserSummaryLogs)
 }
 
 type createCCTVInput struct {
@@ -371,3 +376,120 @@ func (h *CCTVHandler) DeleteCCTV(c fiber.Ctx) error {
 
 	return SuccessResponse(c, fiber.Map{"message": "camera deleted successfully"})
 }
+
+func (h *CCTVHandler) CreateViewLog(c fiber.Ctx) error {
+	log.Printf("[CCTV CreateViewLog] Received body: %s", string(c.Body()))
+
+	adminIDStr, err := GetAdminIDFromClaims(c)
+	if err != nil || adminIDStr == "" {
+		log.Printf("[CCTV CreateViewLog] Auth error: %v, adminIDStr=%s", err, adminIDStr)
+		return ErrorResponse(c, "unauthorized", fiber.StatusUnauthorized)
+	}
+
+	adminID, err := uuid.Parse(adminIDStr)
+	if err != nil {
+		log.Printf("[CCTV CreateViewLog] UUID parse error for adminID=%s: %v", adminIDStr, err)
+		return ErrorResponse(c, "invalid user id in claims", fiber.StatusBadRequest)
+	}
+
+	var input domain.CreateCCTVLogInput
+	if err := c.Bind().JSON(&input); err != nil {
+		log.Printf("[CCTV CreateViewLog] JSON bind error: %v", err)
+		return ErrorResponse(c, "invalid request body", fiber.StatusBadRequest)
+	}
+
+	if input.CCTVID == "" {
+		return ErrorResponse(c, "cctv_id is required", fiber.StatusBadRequest)
+	}
+
+	clientIP := c.IP()
+	userAgent := c.Get("User-Agent")
+
+	if err := h.useCase.RecordViewLog(input, adminID, clientIP, userAgent); err != nil {
+		log.Printf("[CCTV CreateViewLog] RecordViewLog returned error: %v", err)
+		return ErrorResponse(c, err.Error(), fiber.StatusInternalServerError)
+	}
+
+	log.Printf("[CCTV CreateViewLog] Successfully recorded log for CCTV=%s, User=%s", input.CCTVID, adminID)
+	return SuccessResponse(c, fiber.Map{"message": "log recorded successfully"})
+}
+
+func (h *CCTVHandler) GetRecentLogs(c fiber.Ctx) error {
+	pageStr := c.Query("page_number")
+	limitStr := c.Query("page_size")
+
+	page := 1
+	limit := 15
+
+	if pageStr != "" {
+		if p, err := strconv.Atoi(pageStr); err == nil && p > 0 {
+			page = p
+		}
+	}
+	if limitStr != "" {
+		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
+			limit = l
+		}
+	}
+
+	query := domain.CCTVLogQuery{
+		PageNumber: page,
+		PageSize:   limit,
+	}
+
+	if cctvIDStr := c.Query("cctv_id"); cctvIDStr != "" {
+		if cID, err := uuid.Parse(cctvIDStr); err == nil {
+			query.CCTVID = &cID
+		}
+	}
+
+	resp, err := h.useCase.GetRecentLogs(query)
+	if err != nil {
+		return ErrorResponse(c, err.Error(), fiber.StatusInternalServerError)
+	}
+
+	return c.JSON(fiber.Map{
+		"items":       resp.Items,
+		"total_items": resp.TotalItems,
+		"page_number": resp.PageNumber,
+		"total_pages": resp.TotalPages,
+	})
+}
+
+func (h *CCTVHandler) GetUserSummaryLogs(c fiber.Ctx) error {
+	pageStr := c.Query("page_number")
+	limitStr := c.Query("page_size")
+
+	page := 1
+	limit := 15
+
+	if pageStr != "" {
+		if p, err := strconv.Atoi(pageStr); err == nil && p > 0 {
+			page = p
+		}
+	}
+	if limitStr != "" {
+		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
+			limit = l
+		}
+	}
+
+	query := domain.CCTVLogQuery{
+		PageNumber: page,
+		PageSize:   limit,
+		Search:     c.Query("search"),
+	}
+
+	resp, err := h.useCase.GetUserSummaryLogs(query)
+	if err != nil {
+		return ErrorResponse(c, err.Error(), fiber.StatusInternalServerError)
+	}
+
+	return c.JSON(fiber.Map{
+		"items":       resp.Items,
+		"total_items": resp.TotalItems,
+		"page_number": resp.PageNumber,
+		"total_pages": resp.TotalPages,
+	})
+}
+

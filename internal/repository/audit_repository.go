@@ -10,7 +10,7 @@ type auditLogRepository struct {
 	db *gorm.DB
 }
 
-func NewAuditLogRepository(db *gorm.DB) *auditLogRepository {
+func NewAuditLogRepository(db *gorm.DB) domain.AuditLogRepository {
 	return &auditLogRepository{db}
 }
 

@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"log"
 	"super-app-chonburi-go/internal/domain"
 	"super-app-chonburi-go/pkg/jwtutil"
 	"time"
@@ -9,11 +10,11 @@ import (
 	"github.com/google/uuid"
 )
 
-func AuditLog(repo domain.ActivityLogRepository) fiber.Handler {
+func AuditLog(repo domain.AuditLogRepository) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		start := time.Now()
 
-		var adminID, adminName string
+		var userID, roleID string
 		var tokenString string
 
 		authHeader := c.Get("Authorization")
@@ -28,23 +29,29 @@ func AuditLog(repo domain.ActivityLogRepository) fiber.Handler {
 		if tokenString != "" {
 			claims, parseErr := jwtutil.ParseToken(tokenString)
 			if parseErr == nil {
-				adminID = claims.ID
-				adminName = claims.Name
-
+				userID = claims.ID
+				roleID = claims.Role
 				c.Locals("user", claims)
 			}
+		}
+
+		traceID := c.Get("X-Trace-ID")
+		if traceID == "" {
+			traceID = c.Get("X-Request-ID")
+		}
+		if traceID == "" {
+			traceID = uuid.New().String()
 		}
 
 		err := c.Next()
 
 		stop := time.Now()
-		duration := stop.Sub(start).Milliseconds()
 
-		logRecord := &domain.ActivityLog{
-			ID:                 uuid.New(),
-			TraceID:            c.Get("X-Trace-ID"),
-			AdminID:            adminID,
-			AdminName:          adminName,
+		logRecord := &domain.AuditLog{
+			ID:                 uuid.New().String(),
+			TraceId:            traceID,
+			UserId:             userID,
+			RoleId:             roleID,
 			Method:             c.Method(),
 			Path:               c.Path(),
 			ResponseStatusCode: c.Response().StatusCode(),
@@ -52,10 +59,13 @@ func AuditLog(repo domain.ActivityLogRepository) fiber.Handler {
 			UserAgent:          c.Get("User-Agent"),
 			RequestTime:        start,
 			ResponseTime:       stop,
-			DurationMs:         duration,
 		}
 
-		go repo.Create(logRecord)
+		go func(record *domain.AuditLog) {
+			if createErr := repo.Create(record); createErr != nil {
+				log.Printf("⚠️ [AuditLog] Failed to record audit log: %v", createErr)
+			}
+		}(logRecord)
 
 		return err
 	}
