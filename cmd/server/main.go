@@ -6,6 +6,7 @@ import (
 
 	"super-app-chonburi-go/config"
 	delivery "super-app-chonburi-go/internal/delivery/http"
+	"super-app-chonburi-go/internal/delivery/http/middleware"
 	"super-app-chonburi-go/internal/repository"
 	"super-app-chonburi-go/internal/usecase"
 	"super-app-chonburi-go/pkg/database"
@@ -74,6 +75,7 @@ func main() {
 	publicRelationRepo := repository.NewPublicRelationRepository(database.DB)
 	verificationRepo := repository.NewVerificationRepository(database.DB)
 	cctvRepo := repository.NewCCTVRepository(database.DB)
+	auditRepo := repository.NewAuditLogRepository(database.DB)
 
 	emailSender := mail.NewSMTPEmailSender(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPEmail, cfg.SMTPPassword)
 	storageProvider := storage.NewMinIOStorage(minioClient)
@@ -118,6 +120,7 @@ func main() {
 	notificationHandler := delivery.NewNotificationHandler(database.DB, fcmWorkerPool)
 
 	api := app.Group("/api/v1")
+	api.Use(middleware.AuditLog(auditRepo))
 
 	authHandler.RegisterRoutes(api)
 	uploadHandler.RegisterRoutes(app)

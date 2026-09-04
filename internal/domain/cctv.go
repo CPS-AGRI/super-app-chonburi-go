@@ -60,6 +60,31 @@ func (CCTVRequest) TableName() string {
 	return "module_cctv_requests"
 }
 
+// CCTVViewLog represents a view session log for a CCTV camera.
+type CCTVViewLog struct {
+	ID              uuid.UUID  `gorm:"type:uuid;primaryKey;default:uuid_generate_v4();column:id" json:"id"`
+	CCTVID          uuid.UUID  `gorm:"type:uuid;not null;column:cctv_id;index:idx_cctv_logs_cctv" json:"cctv_id"`
+	UserID          uuid.UUID  `gorm:"type:uuid;not null;column:user_id;index:idx_cctv_logs_user" json:"user_id"`
+	PolicyType      string     `gorm:"type:varchar(20);not null;default:'AdminPolicy';column:policy_type" json:"policy_type"` // 'AdminPolicy', 'UserPolicy'
+	DeviceType      string     `gorm:"type:varchar(50);default:'Desktop';column:device_type" json:"device_type"`
+	StartedAt       time.Time  `gorm:"type:timestamptz;not null;default:now();column:started_at;index:idx_cctv_logs_started" json:"started_at"`
+	EndedAt         *time.Time `gorm:"type:timestamptz;column:ended_at" json:"ended_at,omitempty"`
+	DurationSeconds int        `gorm:"type:int;not null;default:0;column:duration_seconds" json:"duration_seconds"`
+	IPAddress       string     `gorm:"type:varchar(45);column:ip_address" json:"ip_address,omitempty"`
+	UserAgent       string     `gorm:"type:text;column:user_agent" json:"user_agent,omitempty"`
+	CreatedAt       time.Time  `gorm:"type:timestamptz;not null;default:now();column:created_at" json:"created_at"`
+
+	// Relations
+	CCTV  *CCTV    `gorm:"foreignKey:CCTVID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE" json:"cctv,omitempty"`
+	Admin *Admin   `gorm:"-" json:"admin,omitempty"`
+	User  *AppUser `gorm:"-" json:"user,omitempty"`
+}
+
+// TableName sets the table name for GORM.
+func (CCTVViewLog) TableName() string {
+	return "module_cctv_view_logs"
+}
+
 // CCTVQuery lists query filters for cameras.
 type CCTVQuery struct {
 	PageNumber int    `json:"page_number"`
@@ -89,6 +114,68 @@ type PaginatedCCTVRequestResponse struct {
 	TotalPages int           `json:"total_pages"`
 }
 
+// CCTVLogQuery lists query filters for CCTV view logs.
+type CCTVLogQuery struct {
+	PageNumber int        `json:"page_number"`
+	PageSize   int        `json:"page_size"`
+	CCTVID     *uuid.UUID `json:"cctv_id,omitempty"`
+	UserID     *uuid.UUID `json:"user_id,omitempty"`
+	PolicyType string     `json:"policy_type,omitempty"`
+	Search     string     `json:"search,omitempty"`
+}
+
+// CreateCCTVLogInput represents payload from client when stream finishes.
+type CreateCCTVLogInput struct {
+	CCTVID          string     `json:"cctv_id"`
+	PolicyType      string     `json:"policy_type,omitempty"`
+	DeviceType      string     `json:"device_type"`
+	StartedAt       time.Time  `json:"started_at"`
+	EndedAt         *time.Time `json:"ended_at,omitempty"`
+	DurationSeconds int        `json:"duration_seconds"`
+}
+
+// CCTVRecentLogItem represents a single recent view log item for UI display.
+type CCTVRecentLogItem struct {
+	ID              string `json:"id"`
+	UserName        string `json:"user_name"`
+	PolicyType      string `json:"policy_type"` // 'AdminPolicy', 'UserPolicy'
+	CameraName      string `json:"camera_name"`
+	ViewedTime      string `json:"viewed_time"` // e.g. 14:58:41
+	DurationText    string `json:"duration_text"` // e.g. 1 นาที, 3 นาที
+	DurationSeconds int    `json:"duration_seconds"`
+	DeviceType      string `json:"device_type"` // e.g. Desktop, Mobile
+	StartedAt       string `json:"started_at"`
+}
+
+// PaginatedCCTVRecentLogResponse wraps recent logs list response.
+type PaginatedCCTVRecentLogResponse struct {
+	Items      []CCTVRecentLogItem `json:"items"`
+	TotalItems int64               `json:"total_items"`
+	PageNumber int                 `json:"page_number"`
+	TotalPages int                 `json:"total_pages"`
+}
+
+// CCTVUserSummaryItem represents aggregated user watch statistics for UI display.
+type CCTVUserSummaryItem struct {
+	UserID           string `json:"user_id"`
+	UserName         string `json:"user_name"`
+	PolicyType       string `json:"policy_type"` // 'AdminPolicy', 'UserPolicy'
+	LastViewedText   string `json:"last_viewed_text"` // e.g. 24 ส.ค. 69 08:57
+	TotalMinutes     int    `json:"total_minutes"`
+	TotalMinutesText string `json:"total_minutes_text"` // e.g. 697 นาที
+	TimeLimitText    string `json:"time_limit_text"` // e.g. ไม่จำกัด
+	Status           string `json:"status"` // e.g. ปกติ
+}
+
+
+// PaginatedCCTVUserSummaryResponse wraps user summaries list response.
+type PaginatedCCTVUserSummaryResponse struct {
+	Items      []CCTVUserSummaryItem `json:"items"`
+	TotalItems int64                 `json:"total_items"`
+	PageNumber int                   `json:"page_number"`
+	TotalPages int                   `json:"total_pages"`
+}
+
 // AdminCCTVRepository defines the data layer interface for Admin CCTV API.
 type AdminCCTVRepository interface {
 	Create(cctv *CCTV) error
@@ -97,6 +184,11 @@ type AdminCCTVRepository interface {
 	GetRequestByID(id uuid.UUID) (*CCTVRequest, error)
 	UpdateRequest(req *CCTVRequest) error
 	Delete(id uuid.UUID, adminID string) error
+
+	// CCTV View Logs
+	CreateViewLog(log *CCTVViewLog) error
+	GetRecentLogs(query CCTVLogQuery) (*PaginatedCCTVRecentLogResponse, error)
+	GetUserSummaryLogs(query CCTVLogQuery) (*PaginatedCCTVUserSummaryResponse, error)
 }
 
 // AdminCCTVUseCase defines the business layer interface for Admin CCTV API.
@@ -107,4 +199,10 @@ type AdminCCTVUseCase interface {
 	ApproveRequest(id uuid.UUID, responseFileURL string, approvedBy uuid.UUID) error
 	RejectRequest(id uuid.UUID, reason string, approvedBy uuid.UUID) error
 	DeleteCCTV(id uuid.UUID, adminID string) error
+
+	// CCTV View Logs
+	RecordViewLog(input CreateCCTVLogInput, userID uuid.UUID, clientIP, userAgent string) error
+	GetRecentLogs(query CCTVLogQuery) (*PaginatedCCTVRecentLogResponse, error)
+	GetUserSummaryLogs(query CCTVLogQuery) (*PaginatedCCTVUserSummaryResponse, error)
 }
+

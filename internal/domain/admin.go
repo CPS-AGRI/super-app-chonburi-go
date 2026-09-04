@@ -151,15 +151,20 @@ type AuditLog struct {
 	TraceId            string    `gorm:"not null;column:trace_id;index" json:"trace_id"`
 	UserId             string    `gorm:"not null;column:user_id;index" json:"user_id"`
 	RoleId             string    `gorm:"not null;column:role_id;index" json:"role_id"`
-	MunicipalityIds    string    `gorm:"not null;column:municipality_ids" json:"municipality_ids"`
 	Method             string    `gorm:"not null;column:method" json:"method"`
 	Path               string    `gorm:"not null;column:path" json:"path"`
 	ResponseStatusCode int       `gorm:"not null;column:response_status_code" json:"response_status_code"`
+	IPAddress          string    `gorm:"not null;default:'';column:ip_address" json:"ip_address"`
+	UserAgent          string    `gorm:"not null;default:'';column:user_agent" json:"user_agent"`
 	RequestTime        time.Time `gorm:"not null;type:timestamptz;column:request_time" json:"request_time"`
 	ResponseTime       time.Time `gorm:"not null;type:timestamptz;column:response_time" json:"response_time"`
 }
 
 func (AuditLog) TableName() string { return "audit_logs" }
+
+type AuditLogRepository interface {
+	Create(log *AuditLog) error
+}
 
 func NewUUID() string {
 	return uuid.New().String()

@@ -77,12 +77,12 @@ func ConnectDB(cfg *config.Config) {
 		&domain.ElaasDailySummary{},
 		&domain.CCTV{},
 		&domain.CCTVRequest{},
+		&domain.CCTVViewLog{},
+		&domain.AuditLog{},
 	)
 	if err != nil {
 		log.Fatalf("Fatal: Failed to auto-migrate: %v", err)
 	}
 
-	Seed()
-
-	log.Println("Database initialized and seeded successfully.")
+	log.Println("Database initialized successfully.")
 }
