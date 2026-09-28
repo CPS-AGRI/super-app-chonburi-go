@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  super-app-backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: super-app-backend
+    restart: always
+    environment:
+      - APP_ENV=uat
+      - PORT=8080
+      - DB_DSN=postgres://uat_admin:C807BI%2B%2BwFizSBH%2FFkNgL7J3qW646npW@122.155.169.235:5489/uat_chonburi?sslmode=disable
+      - MINIO_ENDPOINT=122.155.169.235:9000
+      - MINIO_ACCESS_KEY=super-app
+      - MINIO_SECRET_KEY=9e14f112a1b12990157a8c09bfbd8f55276a853052cabb59373ba74823f3e295
+      - MINIO_BUCKET=super-app-assets
+      - MINIO_PUBLIC_BASE_URL=http://122.155.169.235:9000
+      - REDIS_HOST=122.155.169.235
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=ChonburiPlus2026SecureRedisPass#Key
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "8080"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
