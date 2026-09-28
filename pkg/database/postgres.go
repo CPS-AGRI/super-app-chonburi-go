@@ -82,7 +82,6 @@ func ConnectDB(cfg *config.Config) {
 			&domain.BankReconciliationRecord{},
 			&domain.ElaasDailySummary{},
 			&domain.CCTV{},
-			&domain.CCTVRequest{},
 			&domain.CCTVViewLog{},
 			&domain.AuditLog{},
 		)

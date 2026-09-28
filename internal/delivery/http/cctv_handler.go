@@ -4,7 +4,6 @@ import (
 	"log"
 	"strconv"
 	"strings"
-	"time"
 
 	"super-app-chonburi-go/internal/domain"
 	"super-app-chonburi-go/pkg/jwtutil"
@@ -27,10 +26,11 @@ func (h *CCTVHandler) RegisterRoutes(router fiber.Router) {
 	group := router.Group("/cctv", jwtutil.RequireAuth())
 	group.Post("/", h.CreateCCTV)
 	group.Get("/", h.GetCCTVs)
+	group.Put("/:id", h.UpdateCCTV)
+	group.Patch("/:id", h.UpdateCCTV)
 	group.Delete("/:id", h.DeleteCCTV)
-	group.Get("/requests", h.GetRequests)
-	group.Put("/requests/:id/approve", h.ApproveRequest)
-	group.Put("/requests/:id/reject", h.RejectRequest)
+	group.Get("/:id/health", h.CheckHealth)
+	group.Post("/:id/ping", h.CheckHealth)
 	group.Post("/logs", h.CreateViewLog)
 	group.Get("/logs/recent", h.GetRecentLogs)
 	group.Get("/logs/summary", h.GetUserSummaryLogs)
@@ -42,8 +42,20 @@ type createCCTVInput struct {
 	Latitude       float64 `json:"latitude"`
 	Longitude      float64 `json:"longitude"`
 	StreamURL      string  `json:"stream_url"`
-	PermissionType string  `json:"permission_type"` // 'all', 'staff_only'
-	Status         string  `json:"status"`          // 'online', 'offline'
+	AccessLevel    string  `json:"access_level"`    // 'PUBLIC', 'STAFF_ONLY'
+	PermissionType string  `json:"permission_type"` // backward compatibility
+	Status         string  `json:"status"`          // 'ONLINE', 'OFFLINE'
+}
+
+type updateCCTVInput struct {
+	Name           *string  `json:"name"`
+	Location       *string  `json:"location"`
+	Latitude       *float64 `json:"latitude"`
+	Longitude      *float64 `json:"longitude"`
+	StreamURL      *string  `json:"stream_url"`
+	AccessLevel    *string  `json:"access_level"`    // 'PUBLIC', 'STAFF_ONLY'
+	PermissionType *string  `json:"permission_type"` // backward compatibility
+	Status         *string  `json:"status"`          // 'ONLINE', 'OFFLINE'
 }
 
 func (h *CCTVHandler) CreateCCTV(c fiber.Ctx) error {
@@ -60,7 +72,7 @@ func (h *CCTVHandler) CreateCCTV(c fiber.Ctx) error {
 	}
 
 	accessLevel := "PUBLIC"
-	if input.PermissionType == "staff_only" {
+	if strings.ToUpper(input.AccessLevel) == "STAFF_ONLY" || strings.ToLower(input.PermissionType) == "staff_only" {
 		accessLevel = "STAFF_ONLY"
 	}
 
@@ -86,6 +98,63 @@ func (h *CCTVHandler) CreateCCTV(c fiber.Ctx) error {
 	return SuccessResponse(c, cam, fiber.StatusCreated)
 }
 
+func (h *CCTVHandler) UpdateCCTV(c fiber.Ctx) error {
+	idParam := c.Params("id")
+	targetUUID, err := uuid.Parse(idParam)
+	if err != nil {
+		return ErrorResponse(c, "invalid camera UUID", fiber.StatusBadRequest)
+	}
+
+	var input updateCCTVInput
+	if err := c.Bind().JSON(&input); err != nil {
+		return ErrorResponse(c, "invalid request body", fiber.StatusBadRequest)
+	}
+
+	updates := make(map[string]interface{})
+	if input.Name != nil && *input.Name != "" {
+		updates["name"] = *input.Name
+	}
+	if input.Location != nil {
+		updates["address"] = *input.Location
+	}
+	if input.Latitude != nil {
+		updates["latitude"] = *input.Latitude
+	}
+	if input.Longitude != nil {
+		updates["longitude"] = *input.Longitude
+	}
+	if input.StreamURL != nil {
+		updates["stream_url"] = *input.StreamURL
+	}
+	if input.Status != nil {
+		if strings.ToUpper(*input.Status) == "OFFLINE" {
+			updates["status"] = "OFFLINE"
+		} else {
+			updates["status"] = "ONLINE"
+		}
+	}
+	if input.AccessLevel != nil {
+		if strings.ToUpper(*input.AccessLevel) == "STAFF_ONLY" {
+			updates["access_level"] = "STAFF_ONLY"
+		} else {
+			updates["access_level"] = "PUBLIC"
+		}
+	} else if input.PermissionType != nil {
+		if strings.ToUpper(*input.PermissionType) == "STAFF_ONLY" || strings.ToLower(*input.PermissionType) == "staff_only" {
+			updates["access_level"] = "STAFF_ONLY"
+		} else {
+			updates["access_level"] = "PUBLIC"
+		}
+	}
+
+	updatedCam, err := h.useCase.UpdateCCTV(targetUUID, updates)
+	if err != nil {
+		return ErrorResponse(c, err.Error(), fiber.StatusInternalServerError)
+	}
+
+	return SuccessResponse(c, updatedCam, fiber.StatusOK)
+}
+
 type cctvListResponse struct {
 	ID             string  `json:"id"`
 	UUID           string  `json:"uuid"`
@@ -94,9 +163,9 @@ type cctvListResponse struct {
 	Latitude       float64 `json:"latitude"`
 	Longitude      float64 `json:"longitude"`
 	StreamURL      string  `json:"stream_url"`
-	Status         string  `json:"status"`          // 'online', 'offline'
+	Status         string  `json:"status"`          // 'ONLINE', 'OFFLINE'
 	AccessLevel    string  `json:"access_level"`    // 'PUBLIC', 'STAFF_ONLY'
-	PermissionType string  `json:"permission_type"` // 'all', 'staff_only'
+	PermissionType string  `json:"permission_type"` // dynamic 'PUBLIC', 'STAFF_ONLY'
 	CreatedBy      *string `json:"created_by,omitempty"`
 	DeletedBy      *string `json:"deleted_by,omitempty"`
 	SnapshotURL    string  `json:"snapshot_url"`
@@ -108,7 +177,7 @@ func (h *CCTVHandler) GetCCTVs(c fiber.Ctx) error {
 	name := c.Query("name")
 
 	page := 1
-	limit := 10
+	limit := 1000
 
 	if pageStr != "" {
 		if p, err := strconv.Atoi(pageStr); err == nil {
@@ -135,14 +204,14 @@ func (h *CCTVHandler) GetCCTVs(c fiber.Ctx) error {
 	// Map to UI-friendly structure
 	mappedItems := make([]cctvListResponse, len(resp.Items))
 	for i, item := range resp.Items {
-		status := "online"
+		status := "ONLINE"
 		if strings.ToUpper(item.Status) == "OFFLINE" {
-			status = "offline"
+			status = "OFFLINE"
 		}
 
-		permType := "all"
-		if item.AccessLevel == "STAFF_ONLY" {
-			permType = "staff_only"
+		accessLevel := "PUBLIC"
+		if strings.ToUpper(item.AccessLevel) == "STAFF_ONLY" {
+			accessLevel = "STAFF_ONLY"
 		}
 
 		var createdByVal *string
@@ -170,8 +239,8 @@ func (h *CCTVHandler) GetCCTVs(c fiber.Ctx) error {
 			Longitude:      item.Longitude,
 			StreamURL:      item.StreamURL,
 			Status:         status,
-			AccessLevel:    item.AccessLevel,
-			PermissionType: permType,
+			AccessLevel:    accessLevel,
+			PermissionType: accessLevel,
 			CreatedBy:      createdByVal,
 			DeletedBy:      deletedByVal,
 			SnapshotURL:    item.SnapshotURL,
@@ -184,178 +253,6 @@ func (h *CCTVHandler) GetCCTVs(c fiber.Ctx) error {
 		"page_number": resp.PageNumber,
 		"total_pages": resp.TotalPages,
 	})
-}
-
-type cctvRequestResponse struct {
-	ID             string  `json:"id"`
-	CameraID       string  `json:"camera_id"`
-	CameraName     string  `json:"camera_name"`
-	RequesterName  string  `json:"requester_name"`
-	RequesterPhone string  `json:"requester_phone"`
-	RequestedDate  string  `json:"requested_date"` // DD/MM/YYYY
-	TimeRange      string  `json:"time_range"`      // HH:MM - HH:MM
-	Reason         string  `json:"reason"`
-	DocumentURL    *string `json:"document_url"`
-	Status         string  `json:"status"` // 'pending', 'approved', 'rejected'
-	VideoURL       *string `json:"video_url,omitempty"`
-	RejectedReason *string `json:"rejected_reason,omitempty"`
-	CreatedAt      string  `json:"created_at"`
-}
-
-func (h *CCTVHandler) GetRequests(c fiber.Ctx) error {
-	pageStr := c.Query("page_number")
-	limitStr := c.Query("page_size")
-
-	page := 1
-	limit := 10
-
-	if pageStr != "" {
-		if p, err := strconv.Atoi(pageStr); err == nil {
-			page = p
-		}
-	}
-	if limitStr != "" {
-		if l, err := strconv.Atoi(limitStr); err == nil {
-			limit = l
-		}
-	}
-
-	query := domain.CCTVRequestQuery{
-		PageNumber: page,
-		PageSize:   limit,
-	}
-
-	resp, err := h.useCase.GetCCTVRequests(query)
-	if err != nil {
-		return ErrorResponse(c, err.Error(), fiber.StatusInternalServerError)
-	}
-
-	mappedItems := make([]cctvRequestResponse, len(resp.Items))
-	for i, item := range resp.Items {
-		cameraName := item.CCTV.Name
-		if cameraName == "" {
-			cameraName = "CCTV Device"
-		}
-
-		requesterName := ""
-		requesterPhone := ""
-
-		// If user information is preloaded, fetch full name and phone number dynamically
-		if item.User != nil && item.User.Information != nil {
-			if item.User.Information.Name != "" {
-				requesterName = item.User.Information.Name + " " + item.User.Information.LastName
-			}
-			if item.User.Information.Phone != "" {
-				requesterPhone = item.User.Information.Phone
-			}
-		}
-
-		status := strings.ToLower(item.Status)
-
-		var docURL *string
-		if item.EvidenceFileURL != "" {
-			docURL = &item.EvidenceFileURL
-		}
-
-		timeRange := item.StartTime + " - " + item.EndTime
-
-		mappedItems[i] = cctvRequestResponse{
-			ID:             item.ID.String(),
-			CameraID:       cameraName,
-			CameraName:     cameraName,
-			RequesterName:  requesterName,
-			RequesterPhone: requesterPhone,
-			RequestedDate:  item.IncidentDate.Format("02/01/2006"), // format as DD/MM/YYYY
-			TimeRange:      timeRange,
-			Reason:         item.Reason,
-			DocumentURL:    docURL,
-			Status:         status,
-			VideoURL:       item.ResponseFileURL,
-			RejectedReason: item.RejectReason,
-			CreatedAt:      item.CreatedAt.Format(time.RFC3339),
-		}
-	}
-
-	return c.JSON(fiber.Map{
-		"items":       mappedItems,
-		"total_items": resp.TotalItems,
-		"page_number": resp.PageNumber,
-		"total_pages": resp.TotalPages,
-	})
-}
-
-type approveReqBody struct {
-	ResponseFileURL string `json:"response_file_url"`
-}
-
-func (h *CCTVHandler) ApproveRequest(c fiber.Ctx) error {
-	adminIDStr, err := GetAdminIDFromClaims(c)
-	if err != nil {
-		return ErrorResponse(c, "unauthorized", fiber.StatusUnauthorized)
-	}
-
-	adminID, err := uuid.Parse(adminIDStr)
-	if err != nil {
-		return ErrorResponse(c, "invalid admin id format", fiber.StatusBadRequest)
-	}
-
-	idStr := c.Params("id")
-	reqID, err := uuid.Parse(idStr)
-	if err != nil {
-		return ErrorResponse(c, "invalid request id format", fiber.StatusBadRequest)
-	}
-
-	var body approveReqBody
-	if err := c.Bind().JSON(&body); err != nil {
-		return ErrorResponse(c, "invalid request body", fiber.StatusBadRequest)
-	}
-
-	if body.ResponseFileURL == "" {
-		return ErrorResponse(c, "response_file_url is required", fiber.StatusBadRequest)
-	}
-
-	if err := h.useCase.ApproveRequest(reqID, body.ResponseFileURL, adminID); err != nil {
-		return ErrorResponse(c, err.Error(), fiber.StatusInternalServerError)
-	}
-
-	return SuccessResponse(c, fiber.Map{"message": "request approved successfully"})
-}
-
-type rejectReqBody struct {
-	RejectReason string `json:"reject_reason"`
-}
-
-func (h *CCTVHandler) RejectRequest(c fiber.Ctx) error {
-	adminIDStr, err := GetAdminIDFromClaims(c)
-	if err != nil {
-		return ErrorResponse(c, "unauthorized", fiber.StatusUnauthorized)
-	}
-
-	adminID, err := uuid.Parse(adminIDStr)
-	if err != nil {
-		return ErrorResponse(c, "invalid admin id format", fiber.StatusBadRequest)
-	}
-
-	idStr := c.Params("id")
-	reqID, err := uuid.Parse(idStr)
-	if err != nil {
-		return ErrorResponse(c, "invalid request id format", fiber.StatusBadRequest)
-	}
-
-	var body rejectReqBody
-	if err := c.Bind().JSON(&body); err != nil {
-		return ErrorResponse(c, "invalid request body", fiber.StatusBadRequest)
-	}
-
-	if body.RejectReason == "" {
-		return ErrorResponse(c, "reject_reason is required", fiber.StatusBadRequest)
-	}
-
-	if err := h.useCase.RejectRequest(reqID, body.RejectReason, adminID); err != nil {
-		return ErrorResponse(c, err.Error(), fiber.StatusInternalServerError)
-	}
-
-	return SuccessResponse(c, fiber.Map{"message": "request rejected successfully"})
 }
 
 func (h *CCTVHandler) DeleteCCTV(c fiber.Ctx) error {
@@ -492,4 +389,23 @@ func (h *CCTVHandler) GetUserSummaryLogs(c fiber.Ctx) error {
 		"total_pages": resp.TotalPages,
 	})
 }
+
+func (h *CCTVHandler) CheckHealth(c fiber.Ctx) error {
+	idParam := c.Params("id")
+	targetUUID, err := uuid.Parse(idParam)
+	if err != nil {
+		return ErrorResponse(c, "invalid camera UUID", fiber.StatusBadRequest)
+	}
+
+	status, err := h.useCase.CheckCameraHealth(targetUUID)
+	if err != nil {
+		return ErrorResponse(c, err.Error(), fiber.StatusInternalServerError)
+	}
+
+	return SuccessResponse(c, fiber.Map{
+		"id":     idParam,
+		"status": status,
+	}, fiber.StatusOK)
+}
+
 

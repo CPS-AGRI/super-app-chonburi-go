@@ -2,14 +2,18 @@ package usecase
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"super-app-chonburi-go/internal/domain"
@@ -138,4 +142,133 @@ func getPlaceholderImage(camName string) ([]byte, error) {
 		0x00, 0x00, 0x3f, 0x00, 0x37, 0xff, 0xd9,
 	}
 	return tinyJPEG, nil
+}
+
+// StartCCTVHealthCheckWorker starts a background worker that checks camera stream URLs
+// periodically (every 2 minutes) and updates their status in the database to ONLINE or OFFLINE.
+func StartCCTVHealthCheckWorker(db *gorm.DB) {
+	ticker := time.NewTicker(2 * time.Minute)
+	go func() {
+		// Run initial check 3 seconds after server startup
+		time.Sleep(3 * time.Second)
+		checkAllCamerasHealth(db)
+
+		for range ticker.C {
+			checkAllCamerasHealth(db)
+		}
+	}()
+}
+
+// checkAllCamerasHealth iterates over all cameras in the database and checks their stream URL status.
+func checkAllCamerasHealth(db *gorm.DB) {
+	var cameras []domain.CCTV
+	if err := db.Find(&cameras).Error; err != nil {
+		log.Printf("❌ CCTV HealthCheck: Failed to query cameras from database: %v", err)
+		return
+	}
+
+	if len(cameras) == 0 {
+		return
+	}
+
+	log.Printf("🔍 CCTV HealthCheck Worker: Checking connectivity for %d cameras...", len(cameras))
+
+	// Concurrency limiter: max 5 concurrent checks to prevent socket exhaustion
+	sem := make(chan struct{}, 5)
+	var wg sync.WaitGroup
+
+	for _, cam := range cameras {
+		wg.Add(1)
+		go func(c domain.CCTV) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			newStatus := CheckCameraStatus(c.StreamURL)
+
+			// Only update if status actually changed to save DB writes
+			if strings.ToUpper(c.Status) != newStatus {
+				err := db.Model(&domain.CCTV{}).Where("id = ?", c.ID).Update("status", newStatus).Error
+				if err != nil {
+					log.Printf("❌ CCTV HealthCheck: Failed to update status for %s (%s): %v", c.Name, c.ID, err)
+				} else {
+					log.Printf("🔄 CCTV HealthCheck: Camera '%s' status changed [%s -> %s] (Stream: %s)", c.Name, c.Status, newStatus, c.StreamURL)
+				}
+			}
+		}(cam)
+	}
+
+	wg.Wait()
+	log.Println("✅ CCTV HealthCheck Worker: Check cycle completed.")
+}
+
+// CheckCameraStatus checks whether the given stream URL is reachable and functioning.
+// Returns "ONLINE" if reachable, otherwise "OFFLINE".
+func CheckCameraStatus(streamURL string) string {
+	streamURL = strings.TrimSpace(streamURL)
+	if streamURL == "" {
+		return "OFFLINE"
+	}
+
+	// 1. RTSP Stream (rtsp://ip:port/...)
+	if strings.HasPrefix(strings.ToLower(streamURL), "rtsp://") {
+		u, err := url.Parse(streamURL)
+		if err != nil {
+			return "OFFLINE"
+		}
+		host := u.Host
+		if !strings.Contains(host, ":") {
+			host = host + ":554" // Standard RTSP port
+		}
+		conn, err := net.DialTimeout("tcp", host, 3*time.Second)
+		if err != nil {
+			return "OFFLINE"
+		}
+		_ = conn.Close()
+		return "ONLINE"
+	}
+
+	// 2. HTTP / HTTPS Stream (HLS .m3u8, direct video, web stream, YouTube)
+	if strings.HasPrefix(strings.ToLower(streamURL), "http://") || strings.HasPrefix(strings.ToLower(streamURL), "https://") {
+		client := &http.Client{
+			Timeout: 4 * time.Second,
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				if len(via) >= 5 {
+					return errors.New("stopped after 5 redirects")
+				}
+				return nil
+			},
+		}
+
+		// Try HTTP HEAD first (lightweight, minimal bandwidth)
+		reqHead, err := http.NewRequest("HEAD", streamURL, nil)
+		if err == nil {
+			reqHead.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) CCTV-HealthCheck/1.0")
+			resp, err := client.Do(reqHead)
+			if err == nil {
+				_ = resp.Body.Close()
+				if resp.StatusCode < 400 {
+					return "ONLINE"
+				}
+			}
+		}
+
+		// Fallback to HTTP GET with range request if HEAD is rejected (e.g. 405 Method Not Allowed)
+		reqGet, err := http.NewRequest("GET", streamURL, nil)
+		if err == nil {
+			reqGet.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) CCTV-HealthCheck/1.0")
+			reqGet.Header.Set("Range", "bytes=0-1024") // Request only first 1KB
+			resp, err := client.Do(reqGet)
+			if err == nil {
+				_ = resp.Body.Close()
+				if resp.StatusCode < 400 {
+					return "ONLINE"
+				}
+			}
+		}
+
+		return "OFFLINE"
+	}
+
+	return "OFFLINE"
 }

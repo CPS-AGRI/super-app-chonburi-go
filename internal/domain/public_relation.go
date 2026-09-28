@@ -128,6 +128,32 @@ type PublicRelationQuery struct {
 	EndDate    *string
 }
 
+// CreateNotificationCompositeRequest รองรับ 3 modes ในคำขอเดียว:
+// 1. text-only: ส่งข้อความเท่านั้น
+// 2. create-news: สร้างข่าวใหม่พร้อมกัน (atomic)
+// 3. link-news: เชื่อมกับข่าวที่มีอยู่แล้ว
+type CreateNotificationCompositeRequest struct {
+	Title            string
+	Description      *string
+	SendDate         *string
+	Type             string
+	Status           string
+	PublicRelationId *string
+	CreateNews       *CreateNewsInlinePayload
+}
+
+type CreateNewsInlinePayload struct {
+	Title         string
+	DescriptionTh *string
+	DescriptionEn *string
+	Type          string
+	Priority      string
+	StartDate     string
+	EndDate       string
+	Status        string
+	Images        []PublicRelationImage
+}
+
 type PublicRelationNotificationQuery struct {
 	PageNumber int
 	PageSize   int
@@ -166,10 +192,18 @@ type PublicRelationDashboardStats struct {
 	ReportedCommentsCount  int64 `json:"reported_comments_count"`
 }
 
+type PublicRelationMetadata struct {
+	NewsTypes         []string `json:"news_types"`
+	NotificationTypes []string `json:"notification_types"`
+	Priorities        []string `json:"priorities"`
+	Statuses          []string `json:"statuses"`
+}
+
 type PublicRelationRepository interface {
 	GetDashboardStats(moduleId string) (*PublicRelationDashboardStats, error)
 	GetPopularNews(moduleId string, limit int) ([]PublicRelation, error)
 	GetExpiringNews(moduleId string, limit int) ([]PublicRelation, error)
+	GetAvailableTypes(moduleId string) (*PublicRelationMetadata, error)
 
 	GetPaginated(moduleId string, query PublicRelationQuery) (*PaginatedPublicRelationResponse, error)
 	GetByID(moduleId string, id string) (*PublicRelation, error)
@@ -195,6 +229,7 @@ type PublicRelationUseCase interface {
 	GetDashboardStats(moduleId string) (*PublicRelationDashboardStats, error)
 	GetPopularNews(moduleId string, limit int) ([]PublicRelation, error)
 	GetExpiringNews(moduleId string, limit int) ([]PublicRelation, error)
+	GetAvailableTypes(moduleId string) (*PublicRelationMetadata, error)
 
 	GetPaginated(moduleId string, query PublicRelationQuery) (*PaginatedPublicRelationResponse, error)
 	GetByID(moduleId string, id string) (*PublicRelation, error)
@@ -207,6 +242,7 @@ type PublicRelationUseCase interface {
 	GetPaginatedNotifications(moduleId string, query PublicRelationNotificationQuery, history bool) (*PaginatedNotificationResponse, error)
 	GetNotificationByID(moduleId string, id string) (*PublicRelationNotification, error)
 	CreateNotification(notification *PublicRelationNotification, adminID string) error
+	CreateNotificationComposite(moduleId string, req CreateNotificationCompositeRequest, adminID string) (*PublicRelationNotification, error)
 	UpdateNotification(notification *PublicRelationNotification, adminID string) error
 	DeleteNotification(moduleId string, id string, adminID string) error
 
