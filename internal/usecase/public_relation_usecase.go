@@ -11,23 +11,27 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 type publicRelationUseCase struct {
 	repo            domain.PublicRelationRepository
 	adminRepo       domain.AdminRepository
 	storageProvider storage.StorageProvider
+	db              *gorm.DB
 }
 
 func NewPublicRelationUseCase(
 	repo domain.PublicRelationRepository,
 	adminRepo domain.AdminRepository,
 	storageProvider storage.StorageProvider,
+	db *gorm.DB,
 ) domain.PublicRelationUseCase {
 	return &publicRelationUseCase{
 		repo:            repo,
 		adminRepo:       adminRepo,
 		storageProvider: storageProvider,
+		db:              db,
 	}
 }
 
@@ -91,6 +95,10 @@ func (u *publicRelationUseCase) GetExpiringNews(moduleId string, limit int) ([]d
 	return u.repo.GetExpiringNews(moduleId, limit)
 }
 
+func (u *publicRelationUseCase) GetAvailableTypes(moduleId string) (*domain.PublicRelationMetadata, error) {
+	return u.repo.GetAvailableTypes(moduleId)
+}
+
 func (u *publicRelationUseCase) GetPaginated(moduleId string, query domain.PublicRelationQuery) (*domain.PaginatedPublicRelationResponse, error) {
 	if query.PageNumber < 1 {
 		query.PageNumber = 1
@@ -134,7 +142,38 @@ func (u *publicRelationUseCase) Create(pr *domain.PublicRelation, adminID string
 		pr.Images[i].UpdatedBy = pr.UpdatedBy
 	}
 
-	return u.repo.Create(pr)
+	err = u.repo.Create(pr)
+	if err != nil {
+		return err
+	}
+
+	// ส่งแจ้งเตือนไปยัง module_notifications หากสถานะเป็น Published หรือ active
+	statusLower := strings.ToLower(pr.Status)
+	if statusLower == "published" || statusLower == "active" {
+		notifTitle := "มีข่าวประชาสัมพันธ์ใหม่"
+		notifType := "news"
+		if strings.EqualFold(pr.Type, "Activity") {
+			notifTitle = "มีข่าวกิจกรรมใหม่"
+			notifType = "news_activity"
+		}
+
+		body := pr.Title
+		if pr.DescriptionTh != nil && *pr.DescriptionTh != "" && *pr.DescriptionTh != pr.Title {
+			body = fmt.Sprintf("%s: %s", pr.Title, *pr.DescriptionTh)
+		}
+
+		SendBroadcastNotification(
+			pr.ModuleId,
+			notifTitle,
+			body,
+			pr.ID.String(),
+			pr.Status,
+			notifType,
+			pr.CreatedBy,
+		)
+	}
+
+	return nil
 }
 
 func (u *publicRelationUseCase) Update(pr *domain.PublicRelation, adminID string) error {
@@ -223,6 +262,196 @@ func (u *publicRelationUseCase) CreateNotification(notification *domain.PublicRe
 	notification.UpdatedBy = admin.Name + " " + admin.LastName
 
 	return u.repo.CreateNotification(notification)
+}
+
+// CreateNotificationComposite สร้าง notification แบบ atomic รองรับ 3 modes:
+// 1. text-only (req.CreateNews == nil && req.PublicRelationId == nil)
+// 2. create-news (req.CreateNews != nil) → สร้างข่าวใหม่พร้อมกันใน transaction
+// 3. link-news (req.PublicRelationId != nil) → เชื่อมกับข่าวที่มีอยู่แล้ว
+func (u *publicRelationUseCase) CreateNotificationComposite(
+	moduleId string,
+	req domain.CreateNotificationCompositeRequest,
+	adminID string,
+) (*domain.PublicRelationNotification, error) {
+	admin, err := u.adminRepo.GetByID(adminID)
+	if err != nil {
+		return nil, err
+	}
+
+	now := time.Now()
+	adminName := admin.Name + " " + admin.LastName
+	moduleUUID := uuid.MustParse(moduleId)
+
+	var createdNotif *domain.PublicRelationNotification
+
+	txErr := u.db.Transaction(func(tx *gorm.DB) error {
+		var linkedPrID *uuid.UUID
+
+		// Mode 2: สร้างข่าวใหม่พร้อมกัน
+		if req.CreateNews != nil {
+			newsPayload := req.CreateNews
+
+			var startDate, endDate time.Time
+			if t, err := time.Parse(time.RFC3339, newsPayload.StartDate); err == nil {
+				startDate = t
+			} else {
+				startDate = now
+			}
+			if t, err := time.Parse(time.RFC3339, newsPayload.EndDate); err == nil {
+				endDate = t
+			} else {
+				endDate = now.AddDate(0, 1, 0)
+			}
+
+			newsPriority := newsPayload.Priority
+			if newsPriority == "" {
+				newsPriority = "Medium"
+			}
+			newsType := newsPayload.Type
+			if newsType == "" {
+				newsType = "Information"
+			}
+			newsStatus := newsPayload.Status
+			if newsStatus == "" {
+				newsStatus = "Published"
+			}
+
+			newsID := uuid.New()
+			pr := domain.PublicRelation{
+				ID:            newsID,
+				ModuleId:      moduleUUID,
+				AdminUserId:   uuid.MustParse(admin.ID),
+				Title:         newsPayload.Title,
+				DescriptionTh: newsPayload.DescriptionTh,
+				DescriptionEn: newsPayload.DescriptionEn,
+				Type:          newsType,
+				Priority:      newsPriority,
+				StartDate:     startDate,
+				EndDate:       endDate,
+				Status:        newsStatus,
+				CreatedDate:   now,
+				UpdatedDate:   now,
+				CreatedBy:     adminName,
+				UpdatedBy:     adminName,
+			}
+
+			// แปลงรูป Base64 และ upload ไป Minio
+			for i, img := range newsPayload.Images {
+				imgUrl := img.Url
+				if strings.HasPrefix(imgUrl, "data:") {
+					if uploaded, err := u.uploadBase64Image(imgUrl); err == nil {
+						imgUrl = uploaded
+					}
+				}
+				pr.Images = append(pr.Images, domain.PublicRelationImage{
+					ID:                     uuid.New(),
+					ModulePublicRelationId: newsID,
+					Url:                    imgUrl,
+					Sequence:               i + 1,
+					CreatedDate:            now,
+					UpdatedDate:            now,
+					CreatedBy:              adminName,
+					UpdatedBy:              adminName,
+				})
+			}
+
+			if err := tx.Create(&pr).Error; err != nil {
+				return err
+			}
+
+			// สร้าง visitor count
+			vc := domain.PublicRelationVisitorCount{
+				ModulePublicRelationId: newsID,
+				Count:                  0,
+				CreatedDate:            now,
+				UpdatedDate:            now,
+				CreatedBy:              adminName,
+				UpdatedBy:              adminName,
+			}
+			if err := tx.Create(&vc).Error; err != nil {
+				return err
+			}
+
+			linkedPrID = &newsID
+		} else if req.PublicRelationId != nil && *req.PublicRelationId != "" {
+			// Mode 3: เชื่อมกับข่าวเดิม
+			prID, err := uuid.Parse(*req.PublicRelationId)
+			if err != nil {
+				return errors.New("invalid public_relation_id format")
+			}
+			linkedPrID = &prID
+		}
+		// Mode 1: text-only → linkedPrID remains nil
+
+		notifType := req.Type
+		if notifType == "" {
+			if linkedPrID != nil {
+				notifType = "news"
+			} else {
+				notifType = "text"
+			}
+		}
+
+		notif := domain.PublicRelationNotification{
+			ID:               uuid.New(),
+			ModuleId:         moduleUUID,
+			AdminUserId:      uuid.MustParse(admin.ID),
+			PublicRelationID: linkedPrID,
+			Title:            req.Title,
+			Description:      req.Description,
+			Type:             notifType,
+			Status:           req.Status,
+			ProcessStatus:    "pending",
+			CreatedDate:      now,
+			UpdatedDate:      now,
+			CreatedBy:        adminName,
+			UpdatedBy:        adminName,
+		}
+
+		// แปลง send_date ถ้ามี
+		if req.SendDate != nil && *req.SendDate != "" {
+			if t, err := time.Parse(time.RFC3339, *req.SendDate); err == nil {
+				notif.SendDate = &t
+			}
+		}
+
+		if err := tx.Create(&notif).Error; err != nil {
+			return err
+		}
+
+		createdNotif = &notif
+		return nil
+	})
+
+	if txErr != nil {
+		return nil, txErr
+	}
+
+	// ส่งแจ้งเตือนไปยัง module_notifications หากสถานะเป็น active หรือ published
+	if createdNotif != nil {
+		statusLower := strings.ToLower(createdNotif.Status)
+		if statusLower == "active" || statusLower == "published" {
+			refID := createdNotif.ID.String()
+			if createdNotif.PublicRelationID != nil {
+				refID = createdNotif.PublicRelationID.String()
+			}
+			body := ""
+			if createdNotif.Description != nil {
+				body = *createdNotif.Description
+			}
+			SendBroadcastNotification(
+				createdNotif.ModuleId,
+				createdNotif.Title,
+				body,
+				refID,
+				createdNotif.Status,
+				createdNotif.Type,
+				createdNotif.CreatedBy,
+			)
+		}
+	}
+
+	return createdNotif, nil
 }
 
 func (u *publicRelationUseCase) UpdateNotification(notification *domain.PublicRelationNotification, adminID string) error {

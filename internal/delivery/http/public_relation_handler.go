@@ -23,6 +23,7 @@ func (h *PublicRelationHandler) RegisterRoutes(router fiber.Router) {
 	group.Use(jwtutil.RequireAuth())
 
 	group.Get("/dashboard", h.GetDashboardStats)
+	group.Get("/types", h.GetAvailableTypes)
 
 	group.Get("/notifications", h.GetPaginatedNotifications)
 	group.Get("/notifications/histories", h.GetNotificationHistories)
@@ -64,6 +65,19 @@ func (h *PublicRelationHandler) GetDashboardStats(c fiber.Ctx) error {
 			"popular":  popular,
 			"expiring": expiring,
 		},
+	})
+}
+
+func (h *PublicRelationHandler) GetAvailableTypes(c fiber.Ctx) error {
+	moduleId := c.Params("moduleId")
+	metadata, err := h.uc.GetAvailableTypes(moduleId)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"data":    metadata,
 	})
 }
 
@@ -306,18 +320,46 @@ func (h *PublicRelationHandler) CreateNotification(c fiber.Ctx) error {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
 	}
 
-	var n domain.PublicRelationNotification
-	if err := c.Bind().JSON(&n); err != nil {
+	var dto CreateNotificationRequest
+	if err := c.Bind().JSON(&dto); err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": "Invalid request body"})
 	}
-	n.ModuleId = uuid.MustParse(moduleId)
 
-	if err := h.uc.CreateNotification(&n, userClaims.ID); err != nil {
+	req := domain.CreateNotificationCompositeRequest{
+		Title:            dto.Title,
+		Description:      dto.Description,
+		SendDate:         dto.SendDate,
+		Type:             dto.Type,
+		Status:           dto.Status,
+		PublicRelationId: dto.PublicRelationId,
+	}
+
+	if dto.CreateNews != nil {
+		images := make([]domain.PublicRelationImage, 0, len(dto.CreateNews.Images))
+		for _, img := range dto.CreateNews.Images {
+			images = append(images, domain.PublicRelationImage{Url: img.Url})
+		}
+		req.CreateNews = &domain.CreateNewsInlinePayload{
+			Title:         dto.CreateNews.Title,
+			DescriptionTh: dto.CreateNews.DescriptionTh,
+			DescriptionEn: dto.CreateNews.DescriptionEn,
+			Type:          dto.CreateNews.Type,
+			Priority:      dto.CreateNews.Priority,
+			StartDate:     dto.CreateNews.StartDate.Format("2006-01-02T15:04:05Z07:00"),
+			EndDate:       dto.CreateNews.EndDate.Format("2006-01-02T15:04:05Z07:00"),
+			Status:        dto.CreateNews.Status,
+			Images:        images,
+		}
+	}
+
+	notif, err := h.uc.CreateNotificationComposite(moduleId, req, userClaims.ID)
+	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
 
-	return c.Status(201).JSON(fiber.Map{"success": true, "data": n})
+	return c.Status(201).JSON(fiber.Map{"success": true, "data": notif})
 }
+
 
 func (h *PublicRelationHandler) UpdateNotification(c fiber.Ctx) error {
 	moduleId := c.Params("moduleId")

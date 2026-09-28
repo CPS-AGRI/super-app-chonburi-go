@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"errors"
+	"strings"
 	"time"
 
 	"super-app-chonburi-go/internal/domain"
@@ -43,48 +44,15 @@ func (u *cctvUseCase) GetCCTVs(query domain.CCTVQuery) (*domain.PaginatedCCTVRes
 	return u.repo.GetPaginated(query)
 }
 
-func (u *cctvUseCase) GetCCTVRequests(query domain.CCTVRequestQuery) (*domain.PaginatedCCTVRequestResponse, error) {
-	if query.PageNumber <= 0 {
-		query.PageNumber = 1
-	}
-	if query.PageSize <= 0 {
-		query.PageSize = 10
-	}
-	return u.repo.GetRequestsPaginated(query)
+func (u *cctvUseCase) GetCCTVByID(id uuid.UUID) (*domain.CCTV, error) {
+	return u.repo.FindByID(id)
 }
 
-func (u *cctvUseCase) ApproveRequest(id uuid.UUID, responseFileURL string, approvedBy uuid.UUID) error {
-	req, err := u.repo.GetRequestByID(id)
-	if err != nil {
-		return err
+func (u *cctvUseCase) UpdateCCTV(id uuid.UUID, updates map[string]interface{}) (*domain.CCTV, error) {
+	if err := u.repo.Update(id, updates); err != nil {
+		return nil, err
 	}
-	if req == nil {
-		return errors.New("cctv request not found")
-	}
-
-	req.Status = "APPROVED"
-	req.ResponseFileURL = &responseFileURL
-	req.ApprovedByID = &approvedBy
-	req.UpdatedAt = time.Now()
-
-	return u.repo.UpdateRequest(req)
-}
-
-func (u *cctvUseCase) RejectRequest(id uuid.UUID, reason string, approvedBy uuid.UUID) error {
-	req, err := u.repo.GetRequestByID(id)
-	if err != nil {
-		return err
-	}
-	if req == nil {
-		return errors.New("cctv request not found")
-	}
-
-	req.Status = "REJECTED"
-	req.RejectReason = &reason
-	req.ApprovedByID = &approvedBy
-	req.UpdatedAt = time.Now()
-
-	return u.repo.UpdateRequest(req)
+	return u.repo.FindByID(id)
 }
 
 func (u *cctvUseCase) DeleteCCTV(id uuid.UUID, adminID string) error {
@@ -186,4 +154,17 @@ func (u *cctvUseCase) GetUserSummaryLogs(query domain.CCTVLogQuery) (*domain.Pag
 	}
 	return u.repo.GetUserSummaryLogs(query)
 }
+
+func (u *cctvUseCase) CheckCameraHealth(id uuid.UUID) (string, error) {
+	cam, err := u.repo.FindByID(id)
+	if err != nil {
+		return "OFFLINE", err
+	}
+	status := CheckCameraStatus(cam.StreamURL)
+	if strings.ToUpper(cam.Status) != status {
+		_ = u.repo.Update(id, map[string]interface{}{"status": status})
+	}
+	return status, nil
+}
+
 

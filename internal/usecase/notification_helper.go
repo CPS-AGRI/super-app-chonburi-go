@@ -166,3 +166,70 @@ func SendNotificationToAdmin(adminID uuid.UUID, title, body, refID, refStatus, n
 	}
 }
 
+func SendBroadcastNotification(moduleID uuid.UUID, title, body, refID, refStatus, notifType, createdBy string) {
+	db := database.DB
+	if db == nil {
+		log.Println("[Notif-Helper] ข้อผิดพลาด: database.DB ยังไม่ได้เชื่อมต่อ")
+		return
+	}
+
+	if createdBy == "" {
+		createdBy = "usecase_trigger"
+	}
+
+	newNotif := domain.ModuleNotification{
+		ID:              uuid.New(),
+		ModuleID:        moduleID,
+		UserID:          nil,
+		ReferenceID:     refID,
+		ReferenceTitle:  title,
+		ReferenceBody:   body,
+		ReferenceStatus: refStatus,
+		Type:            "user",
+		Status:          "published",
+		State:           "unread",
+		IsRead:          false,
+		CreatedBy:       createdBy,
+		CreatedDate:     time.Now(),
+		UpdatedDate:     time.Now(),
+	}
+
+	if err := db.Create(&newNotif).Error; err != nil {
+		log.Printf("[Notif-Helper] ข้อผิดพลาดในการบันทึกแจ้งเตือนสาธารณะ: %v", err)
+		return
+	}
+
+	var deviceTokens []domain.ModuleDeviceToken
+	err := db.Find(&deviceTokens).Error
+	if err == nil && len(deviceTokens) > 0 {
+		var tokens []string
+		for _, dt := range deviceTokens {
+			if dt.Token != "" {
+				tokens = append(tokens, dt.Token)
+			}
+		}
+
+		if len(tokens) > 0 {
+			payload := FCMPayload{
+				Tokens:     tokens,
+				Title:      title,
+				Body:       body,
+				RetryCount: 3,
+				Data: map[string]string{
+					"notification_id": newNotif.ID.String(),
+					"reference_id":    refID,
+					"module_type":     notifType,
+				},
+			}
+
+			if GlobalFCMWorkerPool != nil {
+				GlobalFCMWorkerPool.Submit(payload)
+			} else {
+				log.Println("[Notif-Helper] GlobalFCMWorkerPool ยังไม่ได้ Initialize")
+			}
+		}
+	} else {
+		log.Println("[Notif-Helper] ยังไม่มีอุปกรณ์ที่ลงทะเบียน Device Token สำหรับรับแจ้งเตือนสาธารณะ")
+	}
+}
+

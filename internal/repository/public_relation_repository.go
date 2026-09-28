@@ -81,6 +81,75 @@ func (r *publicRelationRepository) GetExpiringNews(moduleId string, limit int) (
 	return prs, err
 }
 
+func (r *publicRelationRepository) GetAvailableTypes(moduleId string) (*domain.PublicRelationMetadata, error) {
+	meta := &domain.PublicRelationMetadata{
+		NewsTypes:         []string{},
+		NotificationTypes: []string{},
+		Priorities:        []string{},
+		Statuses:          []string{},
+	}
+
+	if err := r.db.Model(&domain.PublicRelation{}).
+		Distinct("type").
+		Where("type IS NOT NULL AND type <> ''").
+		Pluck("type", &meta.NewsTypes).Error; err != nil {
+		return nil, err
+	}
+
+	var moduleTypes []string
+	_ = r.db.Table("module_types").
+		Where("module_id = ?", moduleId).
+		Pluck("name_th", &moduleTypes).Error
+	for _, mt := range moduleTypes {
+		found := false
+		for _, nt := range meta.NewsTypes {
+			if nt == mt {
+				found = true
+				break
+			}
+		}
+		if !found && mt != "" {
+			meta.NewsTypes = append(meta.NewsTypes, mt)
+		}
+	}
+
+	if err := r.db.Model(&domain.PublicRelationNotification{}).
+		Distinct("type").
+		Where("type IS NOT NULL AND type <> ''").
+		Pluck("type", &meta.NotificationTypes).Error; err != nil {
+		return nil, err
+	}
+
+	hasText := false
+	for _, t := range meta.NotificationTypes {
+		if t == "text" {
+			hasText = true
+			break
+		}
+	}
+	if !hasText {
+		meta.NotificationTypes = append(meta.NotificationTypes, "text")
+	}
+
+	_ = r.db.Model(&domain.PublicRelation{}).
+		Distinct("priority").
+		Where("priority IS NOT NULL AND priority <> ''").
+		Pluck("priority", &meta.Priorities).Error
+	if len(meta.Priorities) == 0 {
+		meta.Priorities = []string{"High", "Medium", "Low"}
+	}
+
+	_ = r.db.Model(&domain.PublicRelation{}).
+		Distinct("status").
+		Where("status IS NOT NULL AND status <> ''").
+		Pluck("status", &meta.Statuses).Error
+	if len(meta.Statuses) == 0 {
+		meta.Statuses = []string{"Published", "Draft", "Archived"}
+	}
+
+	return meta, nil
+}
+
 func (r *publicRelationRepository) GetPaginated(moduleId string, query domain.PublicRelationQuery) (*domain.PaginatedPublicRelationResponse, error) {
 	var items []domain.PublicRelation
 	var total int64

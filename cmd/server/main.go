@@ -113,12 +113,13 @@ func main() {
 	muniWorkScheduleUC := usecase.NewMunicipalityWorkScheduleUseCase(muniWorkScheduleRepo)
 	dashboardUC := usecase.NewDashboardUseCase(dashboardRepo)
 	taxNewUC := usecase.NewTaxNewUseCase(taxNewRepo, emailSender, "")
-	publicRelationUC := usecase.NewPublicRelationUseCase(publicRelationRepo, adminRepo, storageProvider)
+	publicRelationUC := usecase.NewPublicRelationUseCase(publicRelationRepo, adminRepo, storageProvider, database.DB)
 	verificationUC := usecase.NewVerificationUseCase(verificationRepo)
 	cctvUC := usecase.NewCCTVUseCase(cctvRepo)
 
-	// Start CCTV Snapshot Background Worker
+	// Start CCTV Snapshot & Healthcheck Background Workers
 	usecase.StartSnapshotWorker(database.DB, storageProvider)
+	usecase.StartCCTVHealthCheckWorker(database.DB)
 
 	authHandler := delivery.NewAuthHandler(authUC)
 	uploadHandler := delivery.NewUploadHandler(minioClient, cfg.MinIO)
