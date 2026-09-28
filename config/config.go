@@ -9,15 +9,16 @@ import (
 )
 
 type Config struct {
-	AppEnv       string
-	AppPort      string
-	DBDsn        string
-	OrgName      string
-	OrgLogoURL   string
-	FrontendURL  string
-	SMTPHost     string
-	SMTPPort     string
-	SMTPEmail    string
+	AppEnv             string
+	AppPort            string
+	AutoMigrate        bool
+	DBDsn              string
+	OrgName            string
+	OrgLogoURL         string
+	FrontendURL        string
+	SMTPHost           string
+	SMTPPort           string
+	SMTPEmail          string
 	SMTPPassword       string
 	CORSAllowedOrigins string
 	MinIO              MinIOConfig
@@ -134,6 +135,7 @@ func LoadConfig() *Config {
 	return &Config{
 		AppEnv:             appEnv,
 		AppPort:            port,
+		AutoMigrate:        getEnvBool("AUTO_MIGRATE", true),
 		DBDsn:              dsn,
 		OrgName:            orgName,
 		OrgLogoURL:         orgLogoURL,
