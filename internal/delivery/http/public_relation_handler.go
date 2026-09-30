@@ -19,6 +19,10 @@ func NewPublicRelationHandler(uc domain.PublicRelationUseCase) *PublicRelationHa
 }
 
 func (h *PublicRelationHandler) RegisterRoutes(router fiber.Router) {
+	// Public routes (No authentication required - used by Web App SSR, Open Graph crawlers, and public visitors)
+	router.Get("/public-relations/news/:id", h.GetPublicByID)
+	router.Get("/public/news/:id", h.GetPublicByID)
+
 	group := router.Group("/modules/:moduleId/public-relations")
 	group.Use(jwtutil.RequireAuth())
 
@@ -129,6 +133,23 @@ func (h *PublicRelationHandler) GetByID(c fiber.Ctx) error {
 	}
 	if res == nil {
 		return c.Status(404).JSON(fiber.Map{"error": "public relation not found"})
+	}
+
+	return c.JSON(fiber.Map{"success": true, "data": res})
+}
+
+func (h *PublicRelationHandler) GetPublicByID(c fiber.Ctx) error {
+	id := c.Params("id")
+	if id == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "id is required"})
+	}
+
+	res, err := h.uc.GetPublicByID(id)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+	if res == nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "news not found"})
 	}
 
 	return c.JSON(fiber.Map{"success": true, "data": res})

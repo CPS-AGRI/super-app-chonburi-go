@@ -209,6 +209,25 @@ func (r *publicRelationRepository) GetByID(moduleId string, id string) (*domain.
 	return &pr, nil
 }
 
+func (r *publicRelationRepository) GetPublicByID(id string) (*domain.PublicRelation, error) {
+	var pr domain.PublicRelation
+	err := r.db.Preload("Images", func(db *gorm.DB) *gorm.DB {
+		return db.Order("sequence ASC")
+	}).
+		Preload("VisitorCount").
+		Where("id = ?", id).
+		First(&pr).Error
+
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	return &pr, nil
+}
+
 func (r *publicRelationRepository) Create(pr *domain.PublicRelation) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(pr).Error; err != nil {
