@@ -66,11 +66,6 @@ func (h *CCTVHandler) CreateCCTV(c fiber.Ctx) error {
 		return ErrorResponse(c, "invalid request body", fiber.StatusBadRequest)
 	}
 
-	status := "ONLINE"
-	if strings.ToUpper(input.Status) == "OFFLINE" {
-		status = "OFFLINE"
-	}
-
 	accessLevel := "PUBLIC"
 	if strings.ToUpper(input.AccessLevel) == "STAFF_ONLY" || strings.ToLower(input.PermissionType) == "staff_only" {
 		accessLevel = "STAFF_ONLY"
@@ -83,7 +78,6 @@ func (h *CCTVHandler) CreateCCTV(c fiber.Ctx) error {
 		Latitude:    input.Latitude,
 		Longitude:   input.Longitude,
 		StreamURL:   input.StreamURL,
-		Status:      status,
 		AccessLevel: accessLevel,
 	}
 
