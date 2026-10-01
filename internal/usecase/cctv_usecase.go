@@ -29,6 +29,7 @@ func (u *cctvUseCase) CreateCCTV(cctv *domain.CCTV) error {
 	if cctv.ID == uuid.Nil {
 		cctv.ID = uuid.New()
 	}
+	cctv.Status = CheckCameraStatus(cctv.StreamURL)
 	cctv.CreatedAt = time.Now()
 	cctv.UpdatedAt = time.Now()
 	return u.repo.Create(cctv)
@@ -49,6 +50,9 @@ func (u *cctvUseCase) GetCCTVByID(id uuid.UUID) (*domain.CCTV, error) {
 }
 
 func (u *cctvUseCase) UpdateCCTV(id uuid.UUID, updates map[string]interface{}) (*domain.CCTV, error) {
+	if streamURL, ok := updates["stream_url"].(string); ok && streamURL != "" {
+		updates["status"] = CheckCameraStatus(streamURL)
+	}
 	if err := u.repo.Update(id, updates); err != nil {
 		return nil, err
 	}
