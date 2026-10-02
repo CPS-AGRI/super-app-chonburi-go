@@ -51,14 +51,34 @@ func SendNotificationToUser(userID uuid.UUID, title, body, refID, refStatus, not
 		log.Printf("[Notif-Helper] ข้อผิดพลาดในการบันทึกแจ้งเตือนยูสเซอร์: %v", err)
 	}
 
-	var deviceTokens []domain.ModuleDeviceToken
-	err := db.Where("user_id = ?", userID).Find(&deviceTokens).Error
-	if err == nil && len(deviceTokens) > 0 {
-		var tokens []string
-		for _, dt := range deviceTokens {
-			tokens = append(tokens, dt.Token)
-		}
+	var tokens []string
+	seen := make(map[string]bool)
 
+	// 1. ดึงจาก user_fcm_tokens (ตารางหลักที่ Mobile App ลงทะเบียน)
+	var fcmTokens []domain.UserFCMToken
+	if err := db.Where("user_id = ? AND token != ''", userID).Find(&fcmTokens).Error; err == nil {
+		for _, ut := range fcmTokens {
+			if ut.Token != "" && !seen[ut.Token] {
+				tokens = append(tokens, ut.Token)
+				seen[ut.Token] = true
+			}
+		}
+	} else {
+		log.Printf("[Notif-Helper] ข้อผิดพลาดในการค้นหา user_fcm_tokens: %v", err)
+	}
+
+	// 2. Fallback / Backward-compatibility: ดึงจาก module_device_tokens เผื่อมี token เก่าค้างอยู่
+	var deviceTokens []domain.ModuleDeviceToken
+	if err := db.Where("user_id = ? AND token != ''", userID).Find(&deviceTokens).Error; err == nil {
+		for _, dt := range deviceTokens {
+			if dt.Token != "" && !seen[dt.Token] {
+				tokens = append(tokens, dt.Token)
+				seen[dt.Token] = true
+			}
+		}
+	}
+
+	if len(tokens) > 0 {
 		payload := FCMPayload{
 			Tokens:     tokens,
 			Title:      title,
@@ -199,34 +219,50 @@ func SendBroadcastNotification(moduleID uuid.UUID, title, body, refID, refStatus
 		return
 	}
 
-	var deviceTokens []domain.ModuleDeviceToken
-	err := db.Find(&deviceTokens).Error
-	if err == nil && len(deviceTokens) > 0 {
-		var tokens []string
-		for _, dt := range deviceTokens {
-			if dt.Token != "" {
-				tokens = append(tokens, dt.Token)
+	var tokens []string
+	seen := make(map[string]bool)
+
+	// 1. ดึง Distinct Tokens จาก user_fcm_tokens (ตารางหลักของ Mobile App)
+	var fcmTokens []string
+	if err := db.Model(&domain.UserFCMToken{}).Where("token != ''").Distinct().Pluck("token", &fcmTokens).Error; err == nil {
+		for _, t := range fcmTokens {
+			if t != "" && !seen[t] {
+				tokens = append(tokens, t)
+				seen[t] = true
 			}
 		}
+	} else {
+		log.Printf("[Notif-Helper] ข้อผิดพลาดในการดึง user_fcm_tokens สำหรับ Broadcast: %v", err)
+	}
 
-		if len(tokens) > 0 {
-			payload := FCMPayload{
-				Tokens:     tokens,
-				Title:      title,
-				Body:       body,
-				RetryCount: 3,
-				Data: map[string]string{
-					"notification_id": newNotif.ID.String(),
-					"reference_id":    refID,
-					"module_type":     notifType,
-				},
+	// 2. Fallback / Backward-compatibility: ดึง Distinct Tokens จาก module_device_tokens เผื่อมี Token ค้างอยู่
+	var deviceTokens []string
+	if err := db.Model(&domain.ModuleDeviceToken{}).Where("token != ''").Distinct().Pluck("token", &deviceTokens).Error; err == nil {
+		for _, t := range deviceTokens {
+			if t != "" && !seen[t] {
+				tokens = append(tokens, t)
+				seen[t] = true
 			}
+		}
+	}
 
-			if GlobalFCMWorkerPool != nil {
-				GlobalFCMWorkerPool.Submit(payload)
-			} else {
-				log.Println("[Notif-Helper] GlobalFCMWorkerPool ยังไม่ได้ Initialize")
-			}
+	if len(tokens) > 0 {
+		payload := FCMPayload{
+			Tokens:     tokens,
+			Title:      title,
+			Body:       body,
+			RetryCount: 3,
+			Data: map[string]string{
+				"notification_id": newNotif.ID.String(),
+				"reference_id":    refID,
+				"module_type":     notifType,
+			},
+		}
+
+		if GlobalFCMWorkerPool != nil {
+			GlobalFCMWorkerPool.Submit(payload)
+		} else {
+			log.Println("[Notif-Helper] GlobalFCMWorkerPool ยังไม่ได้ Initialize")
 		}
 	} else {
 		log.Println("[Notif-Helper] ยังไม่มีอุปกรณ์ที่ลงทะเบียน Device Token สำหรับรับแจ้งเตือนสาธารณะ")
