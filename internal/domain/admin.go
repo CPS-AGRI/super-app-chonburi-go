@@ -147,16 +147,16 @@ type AdminRefreshToken struct {
 func (AdminRefreshToken) TableName() string { return "admin_refresh_tokens" }
 
 type AuditLog struct {
-	ID                 string    `gorm:"type:uuid;primaryKey;column:id" json:"id"`
-	TraceId            string    `gorm:"not null;column:trace_id;index" json:"trace_id"`
-	UserId             string    `gorm:"not null;column:user_id;index" json:"user_id"`
-	RoleId             string    `gorm:"not null;column:role_id;index" json:"role_id"`
+	ID                 string    `gorm:"type:uuid;primaryKey;default:uuid_generate_v4();column:id" json:"id"`
+	TraceId            string    `gorm:"not null;column:trace_id;index:idx_audit_logs_trace_id" json:"trace_id"`
+	UserId             string    `gorm:"not null;column:user_id;index:idx_audit_logs_user_id" json:"user_id"`
+	RoleId             string    `gorm:"not null;column:role_id;index:idx_audit_logs_role_id" json:"role_id"`
 	Method             string    `gorm:"not null;column:method" json:"method"`
 	Path               string    `gorm:"not null;column:path" json:"path"`
 	ResponseStatusCode int       `gorm:"not null;column:response_status_code" json:"response_status_code"`
 	IPAddress          string    `gorm:"not null;default:'';column:ip_address" json:"ip_address"`
 	UserAgent          string    `gorm:"not null;default:'';column:user_agent" json:"user_agent"`
-	RequestTime        time.Time `gorm:"not null;type:timestamptz;column:request_time" json:"request_time"`
+	RequestTime        time.Time `gorm:"not null;type:timestamptz;index:idx_audit_logs_request_time;column:request_time" json:"request_time"`
 	ResponseTime       time.Time `gorm:"not null;type:timestamptz;column:response_time" json:"response_time"`
 }
 

@@ -207,6 +207,7 @@ type PublicRelationRepository interface {
 
 	GetPaginated(moduleId string, query PublicRelationQuery) (*PaginatedPublicRelationResponse, error)
 	GetByID(moduleId string, id string) (*PublicRelation, error)
+	GetPublicByID(id string) (*PublicRelation, error)
 	Create(pr *PublicRelation) error
 	Update(pr *PublicRelation) error
 	Delete(moduleId string, id string) error
@@ -233,6 +234,7 @@ type PublicRelationUseCase interface {
 
 	GetPaginated(moduleId string, query PublicRelationQuery) (*PaginatedPublicRelationResponse, error)
 	GetByID(moduleId string, id string) (*PublicRelation, error)
+	GetPublicByID(id string) (*PublicRelation, error)
 	Create(pr *PublicRelation, adminID string) error
 	Update(pr *PublicRelation, adminID string) error
 	Delete(moduleId string, id string, adminID string) error

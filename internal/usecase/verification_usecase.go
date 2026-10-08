@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"super-app-chonburi-go/internal/domain"
-	"super-app-chonburi-go/pkg/firebase"
 
 	"github.com/google/uuid"
 )
@@ -88,8 +87,18 @@ func (u *verificationUseCase) ApproveVerification(req *domain.ApproveVerificatio
 	}
 
 	tokens, err := u.repo.GetFCMTokens(userID)
-	if err == nil && len(tokens) > 0 {
-		firebase.SendPushNotification(tokens, title, body)
+	if err == nil && len(tokens) > 0 && GlobalFCMWorkerPool != nil {
+		GlobalFCMWorkerPool.Submit(FCMPayload{
+			Tokens:     tokens,
+			Title:      title,
+			Body:       body,
+			RetryCount: 3,
+			Data: map[string]string{
+				"notification_id": notif.ID.String(),
+				"reference_id":    userID.String(),
+				"module_type":     "verification",
+			},
+		})
 	}
 
 	return nil
@@ -148,8 +157,18 @@ func (u *verificationUseCase) RejectVerification(userID uuid.UUID, reason string
 	}
 
 	tokens, err := u.repo.GetFCMTokens(userID)
-	if err == nil && len(tokens) > 0 {
-		firebase.SendPushNotification(tokens, title, body)
+	if err == nil && len(tokens) > 0 && GlobalFCMWorkerPool != nil {
+		GlobalFCMWorkerPool.Submit(FCMPayload{
+			Tokens:     tokens,
+			Title:      title,
+			Body:       body,
+			RetryCount: 3,
+			Data: map[string]string{
+				"notification_id": notif.ID.String(),
+				"reference_id":    userID.String(),
+				"module_type":     "verification",
+			},
+		})
 	}
 
 	return nil

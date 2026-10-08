@@ -41,8 +41,8 @@ func ConnectDB(cfg *config.Config) {
 
 	DB.Exec("CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\"")
 
-	if cfg.AppEnv != "production" {
-		log.Println("Migrating MueangSmart schema (snake_case)...")
+	if cfg.AutoMigrate {
+		log.Printf("[ISO-MIGRATION] Starting schema synchronization (env=%s, time=%s)...", cfg.AppEnv, time.Now().UTC().Format(time.RFC3339))
 		err = DB.AutoMigrate(
 			&domain.AdminRole{},
 			&domain.Admin{},
@@ -64,6 +64,7 @@ func ConnectDB(cfg *config.Config) {
 			&domain.UserInformation{},
 			&domain.UserOauthAccount{},
 			&domain.UserActivityTracking{},
+			&domain.ModuleUsageLog{},
 			&domain.PublicRelation{},
 			&domain.PublicRelationVisitorCount{},
 			&domain.PublicRelationNotification{},
@@ -86,10 +87,20 @@ func ConnectDB(cfg *config.Config) {
 			&domain.AuditLog{},
 		)
 		if err != nil {
-			log.Fatalf("Fatal: Failed to auto-migrate: %v", err)
+			log.Fatalf("Fatal: Failed to auto-migrate schema: %v", err)
 		}
+
+		// Ensure ISO standard indexes exist idempotently
+		DB.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_user_activity_date_module ON user_activity_trackings(date, module_id)")
+		DB.Exec("CREATE INDEX IF NOT EXISTS idx_module_usage_logs_module ON module_usage_logs(module_code)")
+		DB.Exec("CREATE INDEX IF NOT EXISTS idx_module_usage_logs_created_at ON module_usage_logs(created_at)")
+		DB.Exec("CREATE INDEX IF NOT EXISTS idx_module_usage_logs_user_id ON module_usage_logs(user_id)")
+		DB.Exec("CREATE INDEX IF NOT EXISTS idx_audit_logs_trace_id ON audit_logs(trace_id)")
+		DB.Exec("CREATE INDEX IF NOT EXISTS idx_audit_logs_request_time ON audit_logs(request_time)")
+
+		log.Printf("[ISO-MIGRATION] Schema synchronized successfully at %s", time.Now().UTC().Format(time.RFC3339))
 	} else {
-		log.Println("Production environment detected: Skipping AutoMigrate.")
+		log.Println("[ISO-MIGRATION] AUTO_MIGRATE=false detected: Skipping AutoMigrate.")
 	}
 	log.Println("Database initialized successfully.")
 }

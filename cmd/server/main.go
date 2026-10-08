@@ -116,6 +116,8 @@ func main() {
 	publicRelationUC := usecase.NewPublicRelationUseCase(publicRelationRepo, adminRepo, storageProvider, database.DB)
 	verificationUC := usecase.NewVerificationUseCase(verificationRepo)
 	cctvUC := usecase.NewCCTVUseCase(cctvRepo)
+	weatherAccountRepo := repository.NewWeatherAccountRepository(database.DB)
+	weatherAccountUC := usecase.NewWeatherAccountUseCase(weatherAccountRepo)
 
 	// Start CCTV Snapshot & Healthcheck Background Workers
 	usecase.StartSnapshotWorker(database.DB, storageProvider)
@@ -137,8 +139,9 @@ func main() {
 	publicRelationHandler := delivery.NewPublicRelationHandler(publicRelationUC)
 	verificationHandler := delivery.NewVerificationHandler(verificationUC)
 	cctvHandler := delivery.NewCCTVHandler(cctvUC)
+	weatherAccountHandler := delivery.NewWeatherAccountHandler(weatherAccountUC)
 
-	fcmWorkerPool := usecase.InitGlobalFCMWorkerPool(1000, 5)
+	fcmWorkerPool := usecase.InitGlobalFCMWorkerPool(5000, 30)
 	notificationHandler := delivery.NewNotificationHandler(database.DB, fcmWorkerPool)
 
 	api := app.Group("/api/v1")
@@ -162,6 +165,7 @@ func main() {
 	verificationHandler.RegisterRoutes(api)
 	cctvHandler.RegisterRoutes(api)
 	notificationHandler.RegisterRoutes(api)
+	weatherAccountHandler.RegisterRoutes(api)
 
 	port := ":" + cfg.AppPort
 	log.Printf("🚀 Server is starting on http://localhost%s", port)

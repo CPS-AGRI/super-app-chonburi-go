@@ -113,6 +113,10 @@ func (u *publicRelationUseCase) GetByID(moduleId string, id string) (*domain.Pub
 	return u.repo.GetByID(moduleId, id)
 }
 
+func (u *publicRelationUseCase) GetPublicByID(id string) (*domain.PublicRelation, error) {
+	return u.repo.GetPublicByID(id)
+}
+
 func (u *publicRelationUseCase) Create(pr *domain.PublicRelation, adminID string) error {
 	admin, err := u.adminRepo.GetByID(adminID)
 	if err != nil {
