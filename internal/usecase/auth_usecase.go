@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"strings"
 	"super-app-chonburi-go/internal/domain"
 	"super-app-chonburi-go/pkg/jwtutil"
 	"super-app-chonburi-go/pkg/mail"
@@ -101,31 +100,7 @@ func (u *authUseCase) Me(id string) (*domain.Admin, []string, error) {
 		return nil, nil, err
 	}
 
-	permissions := []string{}
-
-	if admin.Role != nil && (strings.EqualFold(admin.Role.Type, "superadmin") || strings.EqualFold(admin.Role.Type, "super_admin")) {
-		permissions = append(permissions, "MANAGE_CITY", "MANAGE_ADMINS", "MANAGE_DEPARTMENTS", "VIEW_ALL_REPORTS")
-	}
-
-	uniqueKeys := make(map[string]bool)
-	for _, dept := range admin.Departments {
-		for _, module := range dept.Modules {
-			if module.Key != nil && *module.Key != "" {
-				uniqueKeys[*module.Key] = true
-			}
-
-			if module.ID == "d01b2ce5-34a9-498b-bba0-b1b8360f1ea9" ||
-				module.NameTh == "ศูนย์ร้องทุกข์" ||
-				module.NameEn == "Complaint Center" {
-				uniqueKeys["ModuleComplaintCenter"] = true
-			}
-		}
-	}
-
-	for key := range uniqueKeys {
-		permissions = append(permissions, key)
-	}
-
+	permissions := jwtutil.ResolveAdminPermissions(admin)
 	return admin, permissions, nil
 }
 

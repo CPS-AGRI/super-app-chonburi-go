@@ -146,6 +146,7 @@ func main() {
 
 	api := app.Group("/api/v1")
 	api.Use(middleware.AuditLog(auditRepo))
+	api.Use(middleware.DenyExecutivesMutation())
 
 	authHandler.RegisterRoutes(api)
 	uploadHandler.RegisterRoutes(app)
