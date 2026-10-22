@@ -14,13 +14,21 @@ type complaintUseCase struct {
 	complaintRepo domain.ComplaintRepository
 	adminRepo     domain.AdminRepository
 	muniRepo      domain.MunicipalityRepository
+	kpiLogger     domain.KPILogger
 }
 
-func NewComplaintUseCase(complaintRepo domain.ComplaintRepository, adminRepo domain.AdminRepository, muniRepo domain.MunicipalityRepository) domain.ComplaintUseCase {
+func NewComplaintUseCase(complaintRepo domain.ComplaintRepository, adminRepo domain.AdminRepository, muniRepo domain.MunicipalityRepository, kpiLogger domain.KPILogger) domain.ComplaintUseCase {
 	return &complaintUseCase{
 		complaintRepo: complaintRepo,
 		adminRepo:     adminRepo,
 		muniRepo:      muniRepo,
+		kpiLogger:     kpiLogger,
+	}
+}
+
+func (u *complaintUseCase) emitKPI(event *domain.KPILog) {
+	if u.kpiLogger != nil {
+		u.kpiLogger.LogEvent(event)
 	}
 }
 
@@ -131,6 +139,35 @@ func (u *complaintUseCase) CreateComplaint(complaint *domain.Complaint) error {
 		"pending",
 	)
 
+
+	var moduleTypeID *uuid.UUID
+	if parsedMT, err := uuid.Parse(complaint.ModuleTypeId); err == nil {
+		moduleTypeID = &parsedMT
+	}
+	var dID *uuid.UUID
+	if complaint.DepartmentId != nil {
+		if parsedDept, err := uuid.Parse(*complaint.DepartmentId); err == nil {
+			dID = &parsedDept
+		}
+	}
+	u.emitKPI(&domain.KPILog{
+		ID:                  uuid.New(),
+		ModuleKey:           domain.ModuleKeyComplaint,
+		ModuleTypeID:        moduleTypeID,
+		DepartmentID:        dID,
+		EntityID:            complaint.ID,
+		DocumentNumber:      &complaint.DocumentId,
+		ActorID:             complaint.UserId,
+		ActorRole:           "AppUsers",
+		EventCode:           domain.EventComplaintSubmitted,
+		ToStatus:            &complaint.Status,
+		StepDurationSeconds: 0,
+		SLATargetSeconds:    24 * 3600,
+		Latitude:            &complaint.Latitude,
+		Longitude:           &complaint.Longitude,
+		CreatedDate:         time.Now().UTC(),
+	})
+
 	return nil
 }
 
@@ -140,6 +177,7 @@ func (u *complaintUseCase) UpdateComplaintStatus(id string, status string, descr
 		return err
 	}
 
+	oldStatus := complaint.Status
 	complaint.Status = status
 	complaint.UpdatedDate = time.Now()
 
@@ -184,6 +222,92 @@ func (u *complaintUseCase) UpdateComplaintStatus(id string, status string, descr
 		"complaint",
 	)
 
+
+	actorUUID, _ := uuid.Parse(adminID)
+	var moduleTypeID *uuid.UUID
+	if parsedMT, err := uuid.Parse(complaint.ModuleTypeId); err == nil {
+		moduleTypeID = &parsedMT
+	}
+	var deptUUID *uuid.UUID
+	if complaint.DepartmentId != nil {
+		if d, err := uuid.Parse(*complaint.DepartmentId); err == nil {
+			deptUUID = &d
+		}
+	}
+	var targetUUID *uuid.UUID
+	if complaint.AssigneeId != nil {
+		if a, err := uuid.Parse(*complaint.AssigneeId); err == nil {
+			targetUUID = &a
+		}
+	}
+	if targetUUID == nil && actorUUID != uuid.Nil {
+		targetUUID = &actorUUID
+		complaint.AssigneeId = &adminID
+		_ = u.complaintRepo.Update(complaint)
+	}
+	targetRole := "Employees"
+
+	// Calculate staff operational duration from assignment time
+	assignedTime := complaint.CreatedDate
+	hasAssignedTime := false
+	for _, act := range complaint.Activities {
+		if act.Status == domain.ComplaintStatusInProgress || strings.Contains(act.Description, "มอบหมาย") {
+			if !hasAssignedTime || act.CreatedDate.Before(assignedTime) {
+				assignedTime = act.CreatedDate
+				hasAssignedTime = true
+			}
+		}
+	}
+
+	if status == domain.ComplaintStatusCompleted {
+		duration := time.Since(assignedTime).Seconds()
+		slaTarget := int64(72 * 3600)
+		isBreached := int64(duration) > slaTarget
+		var breachDuration int64
+		if isBreached {
+			breachDuration = int64(duration) - slaTarget
+		}
+		u.emitKPI(&domain.KPILog{
+			ID:                    uuid.New(),
+			ModuleKey:             domain.ModuleKeyComplaint,
+			ModuleTypeID:          moduleTypeID,
+			DepartmentID:          deptUUID,
+			EntityID:              complaint.ID,
+			DocumentNumber:        &complaint.DocumentId,
+			ActorID:               actorUUID,
+			ActorRole:             "Employees",
+			TargetUserID:          targetUUID,
+			TargetRole:            &targetRole,
+			EventCode:             domain.EventComplaintStaffResolved,
+			FromStatus:            &oldStatus,
+			ToStatus:              &status,
+			StepDurationSeconds:   int64(duration),
+			SLATargetSeconds:      slaTarget,
+			IsSLABreached:         isBreached,
+			BreachDurationSeconds: breachDuration,
+			CreatedDate:           time.Now().UTC(),
+		})
+	} else if status == domain.ComplaintStatusInProgress {
+		duration := time.Since(complaint.CreatedDate).Seconds()
+		u.emitKPI(&domain.KPILog{
+			ID:                  uuid.New(),
+			ModuleKey:           domain.ModuleKeyComplaint,
+			ModuleTypeID:        moduleTypeID,
+			DepartmentID:        deptUUID,
+			EntityID:            complaint.ID,
+			DocumentNumber:      &complaint.DocumentId,
+			ActorID:             actorUUID,
+			ActorRole:           "Employees",
+			TargetUserID:        targetUUID,
+			TargetRole:          &targetRole,
+			EventCode:           domain.EventComplaintStaffAcknowledged,
+			FromStatus:          &oldStatus,
+			ToStatus:            &status,
+			StepDurationSeconds: int64(duration),
+			CreatedDate:         time.Now().UTC(),
+		})
+	}
+
 	return nil
 }
 
@@ -192,6 +316,11 @@ func (u *complaintUseCase) ForwardComplaint(id string, departmentID string, desc
 	if err != nil {
 		return err
 	}
+
+	oldStatus := complaint.Status
+	duration := time.Since(complaint.CreatedDate).Seconds()
+	slaTarget := int64(24 * 3600)
+	isBreached := int64(duration) > slaTarget
 
 	complaint.DepartmentId = &departmentID
 	complaint.Status = domain.ComplaintStatusReceived
@@ -240,6 +369,36 @@ func (u *complaintUseCase) ForwardComplaint(id string, departmentID string, desc
 		"complaint",
 	)
 
+	actorUUID, _ := uuid.Parse(adminID)
+	deptUUID, _ := uuid.Parse(departmentID)
+	statusReceived := domain.ComplaintStatusReceived
+	var moduleTypeID *uuid.UUID
+	if parsedMT, err := uuid.Parse(complaint.ModuleTypeId); err == nil {
+		moduleTypeID = &parsedMT
+	}
+	var breachDuration int64
+	if isBreached {
+		breachDuration = int64(duration) - slaTarget
+	}
+	u.emitKPI(&domain.KPILog{
+		ID:                    uuid.New(),
+		ModuleKey:             domain.ModuleKeyComplaint,
+		ModuleTypeID:          moduleTypeID,
+		DepartmentID:          &deptUUID,
+		EntityID:              complaint.ID,
+		DocumentNumber:        &complaint.DocumentId,
+		ActorID:               actorUUID,
+		ActorRole:             "Managers",
+		EventCode:             domain.EventComplaintCenterForwarded,
+		FromStatus:            &oldStatus,
+		ToStatus:              &statusReceived,
+		StepDurationSeconds:   int64(duration),
+		SLATargetSeconds:      slaTarget,
+		IsSLABreached:         isBreached,
+		BreachDurationSeconds: breachDuration,
+		CreatedDate:           time.Now().UTC(),
+	})
+
 	return nil
 }
 
@@ -247,6 +406,15 @@ func (u *complaintUseCase) AssignComplaint(id string, assigneeID string, descrip
 	complaint, err := u.complaintRepo.GetByID(id, nil, true)
 	if err != nil {
 		return err
+	}
+
+	oldStatus := complaint.Status
+	dispatchDuration := time.Since(complaint.CreatedDate).Seconds()
+	slaTarget := int64(24 * 3600)
+	isBreached := int64(dispatchDuration) > slaTarget
+	var breachDuration int64
+	if isBreached {
+		breachDuration = int64(dispatchDuration) - slaTarget
 	}
 
 	complaint.AssigneeId = &assigneeID
@@ -298,6 +466,41 @@ func (u *complaintUseCase) AssignComplaint(id string, assigneeID string, descrip
 		"complaint",
 	)
 
+	actorUUID, _ := uuid.Parse(adminID)
+	targetUUID, _ := uuid.Parse(assigneeID)
+	var moduleTypeID *uuid.UUID
+	if parsedMT, err := uuid.Parse(complaint.ModuleTypeId); err == nil {
+		moduleTypeID = &parsedMT
+	}
+	var deptUUID *uuid.UUID
+	if complaint.DepartmentId != nil {
+		if d, err := uuid.Parse(*complaint.DepartmentId); err == nil {
+			deptUUID = &d
+		}
+	}
+	targetRole := "Employees"
+	statusInProgress := domain.ComplaintStatusInProgress
+	u.emitKPI(&domain.KPILog{
+		ID:                    uuid.New(),
+		ModuleKey:             domain.ModuleKeyComplaint,
+		ModuleTypeID:          moduleTypeID,
+		DepartmentID:          deptUUID,
+		EntityID:              complaint.ID,
+		DocumentNumber:        &complaint.DocumentId,
+		ActorID:               actorUUID,
+		ActorRole:             "Managers",
+		TargetUserID:          &targetUUID,
+		TargetRole:            &targetRole,
+		EventCode:             domain.EventComplaintManagerAssigned,
+		FromStatus:            &oldStatus,
+		ToStatus:              &statusInProgress,
+		StepDurationSeconds:   int64(dispatchDuration),
+		SLATargetSeconds:      slaTarget,
+		IsSLABreached:         isBreached,
+		BreachDurationSeconds: breachDuration,
+		CreatedDate:           time.Now().UTC(),
+	})
+
 	return nil
 }
 
@@ -307,6 +510,15 @@ func (u *complaintUseCase) RejectComplaint(id string, reason string, adminID str
 		return err
 	}
 
+	oldStatus := complaint.Status
+	duration := time.Since(complaint.CreatedDate).Seconds()
+	var origDeptUUID *uuid.UUID
+	if complaint.DepartmentId != nil {
+		if d, err := uuid.Parse(*complaint.DepartmentId); err == nil {
+			origDeptUUID = &d
+		}
+	}
+
 	muni, err := u.muniRepo.GetFirst()
 	status := domain.ComplaintStatusRejected
 	var activityDesc string
@@ -314,10 +526,8 @@ func (u *complaintUseCase) RejectComplaint(id string, reason string, adminID str
 	complaint.DepartmentId = nil
 
 	if err == nil && muni.ComplaintMode == "direct" {
-
 		activityDesc = "ตีกลับเรื่อง (ถูกปฏิเสธ): " + reason
 	} else {
-
 		activityDesc = "ตีกลับเรื่องไปยังศูนย์ร้องทุกข์: " + reason
 	}
 
@@ -365,6 +575,39 @@ func (u *complaintUseCase) RejectComplaint(id string, reason string, adminID str
 		complaint.ID.String(),
 		"rejected",
 	)
+
+	actorUUID, _ := uuid.Parse(adminID)
+	statusRejected := domain.ComplaintStatusRejected
+	slaTarget := int64(24 * 3600)
+	isBreached := int64(duration) > slaTarget
+	var breachDuration int64
+	if isBreached {
+		breachDuration = int64(duration) - slaTarget
+	}
+	var moduleTypeID *uuid.UUID
+	if parsedMT, err := uuid.Parse(complaint.ModuleTypeId); err == nil {
+		moduleTypeID = &parsedMT
+	}
+
+	u.emitKPI(&domain.KPILog{
+		ID:                    uuid.New(),
+		ModuleKey:             domain.ModuleKeyComplaint,
+		ModuleTypeID:          moduleTypeID,
+		DepartmentID:          origDeptUUID,
+		EntityID:              complaint.ID,
+		DocumentNumber:        &complaint.DocumentId,
+		ActorID:               actorUUID,
+		ActorRole:             "Managers",
+		EventCode:             domain.EventComplaintDeptReturned,
+		FromStatus:            &oldStatus,
+		ToStatus:              &statusRejected,
+		StepDurationSeconds:   int64(duration),
+		SLATargetSeconds:      slaTarget,
+		IsSLABreached:         isBreached,
+		BreachDurationSeconds: breachDuration,
+		Metadata:              fmt.Sprintf(`{"reason":%q}`, reason),
+		CreatedDate:           time.Now().UTC(),
+	})
 
 	return nil
 }
@@ -417,6 +660,89 @@ func (u *complaintUseCase) AddActivity(activity *domain.ComplaintActivity, admin
 					complaint.ID.String(),
 					activity.Status,
 				)
+
+				actorUUID, _ := uuid.Parse(adminID)
+				var moduleTypeID *uuid.UUID
+				if parsedMT, err := uuid.Parse(complaint.ModuleTypeId); err == nil {
+					moduleTypeID = &parsedMT
+				}
+				var deptUUID *uuid.UUID
+				if complaint.DepartmentId != nil {
+					if d, err := uuid.Parse(*complaint.DepartmentId); err == nil {
+						deptUUID = &d
+					}
+				}
+				var targetUUID *uuid.UUID
+				if complaint.AssigneeId != nil {
+					if a, err := uuid.Parse(*complaint.AssigneeId); err == nil {
+						targetUUID = &a
+					}
+				}
+				if targetUUID == nil && actorUUID != uuid.Nil {
+					targetUUID = &actorUUID
+				}
+				targetRole := "Employees"
+
+				// Calculate staff operational duration from assignment time
+				assignedTime := complaint.CreatedDate
+				hasAssignedTime := false
+				for _, act := range complaint.Activities {
+					if act.Status == domain.ComplaintStatusInProgress || strings.Contains(act.Description, "มอบหมาย") {
+						if !hasAssignedTime || act.CreatedDate.Before(assignedTime) {
+							assignedTime = act.CreatedDate
+							hasAssignedTime = true
+						}
+					}
+				}
+
+				if activity.Status == domain.ComplaintStatusCompleted {
+					duration := time.Since(assignedTime).Seconds()
+					slaTarget := int64(72 * 3600)
+					isBreached := int64(duration) > slaTarget
+					var breachDuration int64
+					if isBreached {
+						breachDuration = int64(duration) - slaTarget
+					}
+					u.emitKPI(&domain.KPILog{
+						ID:                    uuid.New(),
+						ModuleKey:             domain.ModuleKeyComplaint,
+						ModuleTypeID:          moduleTypeID,
+						DepartmentID:          deptUUID,
+						EntityID:              complaint.ID,
+						DocumentNumber:        &complaint.DocumentId,
+						ActorID:               actorUUID,
+						ActorRole:             "Employees",
+						TargetUserID:          targetUUID,
+						TargetRole:            &targetRole,
+						EventCode:             domain.EventComplaintStaffResolved,
+						FromStatus:            &oldStatus,
+						ToStatus:              &activity.Status,
+						StepDurationSeconds:   int64(duration),
+						SLATargetSeconds:      slaTarget,
+						IsSLABreached:         isBreached,
+						BreachDurationSeconds: breachDuration,
+						CreatedDate:           time.Now().UTC(),
+					})
+				} else if activity.Status == domain.ComplaintStatusInProgress {
+					duration := time.Since(complaint.CreatedDate).Seconds()
+					u.emitKPI(&domain.KPILog{
+						ID:                  uuid.New(),
+						ModuleKey:           domain.ModuleKeyComplaint,
+						ModuleTypeID:        moduleTypeID,
+						DepartmentID:        deptUUID,
+						EntityID:            complaint.ID,
+						DocumentNumber:      &complaint.DocumentId,
+						ActorID:             actorUUID,
+						ActorRole:           "Employees",
+						TargetUserID:        targetUUID,
+						TargetRole:          &targetRole,
+						EventCode:           domain.EventComplaintStaffAcknowledged,
+						FromStatus:          &oldStatus,
+						ToStatus:            &activity.Status,
+						StepDurationSeconds: int64(duration),
+						CreatedDate:         time.Now().UTC(),
+					})
+				}
 			}
 		} else {
 			complaint.UpdatedDate = time.Now()
@@ -476,6 +802,42 @@ func (u *complaintUseCase) RateComplaint(id string, userID string, rating int, c
 		CreatedDate:       time.Now(),
 		UpdatedDate:       time.Now(),
 	}
+
+
+	var targetUUID *uuid.UUID
+	if assigneeID != nil {
+		if a, err := uuid.Parse(*assigneeID); err == nil {
+			targetUUID = &a
+		}
+	}
+	var deptUUID *uuid.UUID
+	if departmentID != nil {
+		if d, err := uuid.Parse(*departmentID); err == nil {
+			deptUUID = &d
+		}
+	}
+	var moduleTypeID *uuid.UUID
+	if parsedMT, err := uuid.Parse(complaint.ModuleTypeId); err == nil {
+		moduleTypeID = &parsedMT
+	}
+	actorUUID, _ := uuid.Parse(userID)
+	targetRole := "Employees"
+	metadataJSON := fmt.Sprintf(`{"rating":%d,"comment":%q}`, rating, comment)
+	u.emitKPI(&domain.KPILog{
+		ID:             uuid.New(),
+		ModuleKey:      domain.ModuleKeyComplaint,
+		ModuleTypeID:   moduleTypeID,
+		DepartmentID:   deptUUID,
+		EntityID:       complaint.ID,
+		DocumentNumber: &complaint.DocumentId,
+		ActorID:        actorUUID,
+		ActorRole:      "AppUsers",
+		TargetUserID:   targetUUID,
+		TargetRole:     &targetRole,
+		EventCode:      domain.EventComplaintCitizenRated,
+		Metadata:       metadataJSON,
+		CreatedDate:    time.Now().UTC(),
+	})
 
 	return u.complaintRepo.CreateActivity(activity)
 }
@@ -545,6 +907,42 @@ func (u *complaintUseCase) DisputeComplaint(id string, userID string, reason str
 	if err := u.complaintRepo.CreateActivity(activity); err != nil {
 		return err
 	}
+
+
+	var targetUUIDDispute *uuid.UUID
+	if assigneeID != nil {
+		if a, err := uuid.Parse(*assigneeID); err == nil {
+			targetUUIDDispute = &a
+		}
+	}
+	var deptUUIDDispute *uuid.UUID
+	if departmentID != nil {
+		if d, err := uuid.Parse(*departmentID); err == nil {
+			deptUUIDDispute = &d
+		}
+	}
+	var moduleTypeID *uuid.UUID
+	if parsedMT, err := uuid.Parse(complaint.ModuleTypeId); err == nil {
+		moduleTypeID = &parsedMT
+	}
+	actorUUIDDispute, _ := uuid.Parse(userID)
+	targetRoleDispute := "Employees"
+	metadataDisputeJSON := fmt.Sprintf(`{"reason":%q}`, reason)
+	u.emitKPI(&domain.KPILog{
+		ID:             uuid.New(),
+		ModuleKey:      domain.ModuleKeyComplaint,
+		ModuleTypeID:   moduleTypeID,
+		DepartmentID:   deptUUIDDispute,
+		EntityID:       complaint.ID,
+		DocumentNumber: &complaint.DocumentId,
+		ActorID:        actorUUIDDispute,
+		ActorRole:      "AppUsers",
+		TargetUserID:   targetUUIDDispute,
+		TargetRole:     &targetRoleDispute,
+		EventCode:      domain.EventComplaintCitizenDisputed,
+		Metadata:       metadataDisputeJSON,
+		CreatedDate:    time.Now().UTC(),
+	})
 
 	return u.complaintRepo.Update(complaint)
 }
