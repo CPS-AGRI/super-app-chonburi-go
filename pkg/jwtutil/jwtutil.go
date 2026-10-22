@@ -28,35 +28,56 @@ func secretKey() []byte {
 	return []byte(secret)
 }
 
+// ResolveAdminPermissions calculates granular permissions dynamically based on the Admin's role and assigned departments.
+// For Executives, only modules with IsDashboard == true from assigned departments are granted.
+func ResolveAdminPermissions(admin *domain.Admin) []string {
+	permissions := []string{}
+	if admin == nil {
+		return permissions
+	}
+
+	if admin.Role != nil && (strings.EqualFold(admin.Role.Type, domain.RoleSuperAdmin) || strings.EqualFold(admin.Role.Type, "super_admin")) {
+		permissions = append(permissions, "MANAGE_CITY", "MANAGE_ADMINS", "MANAGE_DEPARTMENTS", "VIEW_ALL_REPORTS")
+	}
+
+	isExecutive := admin.Role != nil && (strings.EqualFold(admin.Role.Type, domain.RoleExecutives) || strings.EqualFold(admin.Role.Type, "executive"))
+
+	uniqueKeys := make(map[string]bool)
+	for _, dept := range admin.Departments {
+		for _, module := range dept.Modules {
+			// For Executive role: strictly grant only modules that have an active dashboard in DB
+			if isExecutive && !module.IsDashboard {
+				continue
+			}
+
+			if module.Key != nil && *module.Key != "" {
+				uniqueKeys[*module.Key] = true
+			}
+
+			if module.ID == "d01b2ce5-34a9-498b-bba0-b1b8360f1ea9" ||
+				module.NameTh == "ศูนย์ร้องทุกข์" ||
+				module.NameEn == "Complaint Center" {
+				if !isExecutive || module.IsDashboard {
+					uniqueKeys["ModuleComplaintCenter"] = true
+				}
+			}
+		}
+	}
+
+	for key := range uniqueKeys {
+		permissions = append(permissions, key)
+	}
+
+	return permissions
+}
+
 func GenerateToken(user domain.User) (string, error) {
 
 	name := ""
 	permissions := []string{}
 	if admin, ok := user.(*domain.Admin); ok {
 		name = admin.Name + " " + admin.LastName
-
-		if admin.Role != nil && (strings.EqualFold(admin.Role.Type, "superadmin") || strings.EqualFold(admin.Role.Type, "super_admin")) {
-			permissions = append(permissions, "MANAGE_CITY", "MANAGE_ADMINS", "MANAGE_DEPARTMENTS", "VIEW_ALL_REPORTS")
-		}
-
-		uniqueKeys := make(map[string]bool)
-		for _, dept := range admin.Departments {
-			for _, module := range dept.Modules {
-				if module.Key != nil && *module.Key != "" {
-					uniqueKeys[*module.Key] = true
-				}
-
-				if module.ID == "d01b2ce5-34a9-498b-bba0-b1b8360f1ea9" ||
-					module.NameTh == "ศูนย์ร้องทุกข์" ||
-					module.NameEn == "Complaint Center" {
-					uniqueKeys["ModuleComplaintCenter"] = true
-				}
-			}
-		}
-
-		for key := range uniqueKeys {
-			permissions = append(permissions, key)
-		}
+		permissions = ResolveAdminPermissions(admin)
 	}
 
 	claims := CustomClaims{

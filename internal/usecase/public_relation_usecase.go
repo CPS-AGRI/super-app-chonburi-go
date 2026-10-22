@@ -19,6 +19,7 @@ type publicRelationUseCase struct {
 	adminRepo       domain.AdminRepository
 	storageProvider storage.StorageProvider
 	db              *gorm.DB
+	kpiLogger       domain.KPILogger
 }
 
 func NewPublicRelationUseCase(
@@ -26,12 +27,20 @@ func NewPublicRelationUseCase(
 	adminRepo domain.AdminRepository,
 	storageProvider storage.StorageProvider,
 	db *gorm.DB,
+	kpiLogger domain.KPILogger,
 ) domain.PublicRelationUseCase {
 	return &publicRelationUseCase{
 		repo:            repo,
 		adminRepo:       adminRepo,
 		storageProvider: storageProvider,
 		db:              db,
+		kpiLogger:       kpiLogger,
+	}
+}
+
+func (u *publicRelationUseCase) emitKPI(event *domain.KPILog) {
+	if u.kpiLogger != nil {
+		u.kpiLogger.LogEvent(event)
 	}
 }
 
@@ -151,8 +160,34 @@ func (u *publicRelationUseCase) Create(pr *domain.PublicRelation, adminID string
 		return err
 	}
 
-	// ส่งแจ้งเตือนไปยัง module_notifications หากสถานะเป็น Published หรือ active
+	// Emit PR KPI Event
+	eventCode := domain.EventPRNewsCreated
 	statusLower := strings.ToLower(pr.Status)
+	if statusLower == "published" || statusLower == "active" {
+		eventCode = domain.EventPRNewsPublished
+	}
+	var deptID *uuid.UUID
+	if len(admin.Departments) > 0 {
+		if dID, parseErr := uuid.Parse(admin.Departments[0].ID); parseErr == nil {
+			deptID = &dID
+		}
+	}
+	metaJSON := fmt.Sprintf(`{"title":%q,"type":%q,"priority":%q}`, pr.Title, pr.Type, pr.Priority)
+	u.emitKPI(&domain.KPILog{
+		ModuleKey:      domain.ModuleKeyPublicRelations,
+		DepartmentID:   deptID,
+		EntityID:       pr.ID,
+		DocumentNumber: &pr.Title,
+		ActorID:        pr.AdminUserId,
+		ActorRole:      admin.GetRole(),
+		TargetUserID:   &pr.AdminUserId,
+		EventCode:      eventCode,
+		ToStatus:       &pr.Status,
+		Metadata:       metaJSON,
+		CreatedDate:    time.Now(),
+	})
+
+	// ส่งแจ้งเตือนไปยัง module_notifications หากสถานะเป็น Published หรือ active
 	if statusLower == "published" || statusLower == "active" {
 		notifTitle := "มีข่าวประชาสัมพันธ์ใหม่"
 		notifType := "news"
@@ -222,19 +257,99 @@ func (u *publicRelationUseCase) Update(pr *domain.PublicRelation, adminID string
 		existing.Images[i].UpdatedBy = existing.UpdatedBy
 	}
 
-	return u.repo.Update(existing)
+	err = u.repo.Update(existing)
+	if err != nil {
+		return err
+	}
+
+	// Emit PR KPI Event
+	eventCode := domain.EventPRNewsUpdated
+	if strings.ToLower(existing.Status) == "published" {
+		eventCode = domain.EventPRNewsPublished
+	}
+	var deptID *uuid.UUID
+	if len(admin.Departments) > 0 {
+		if dID, parseErr := uuid.Parse(admin.Departments[0].ID); parseErr == nil {
+			deptID = &dID
+		}
+	}
+	metaJSON := fmt.Sprintf(`{"title":%q,"type":%q,"status":%q}`, existing.Title, existing.Type, existing.Status)
+	u.emitKPI(&domain.KPILog{
+		ModuleKey:      domain.ModuleKeyPublicRelations,
+		DepartmentID:   deptID,
+		EntityID:       existing.ID,
+		DocumentNumber: &existing.Title,
+		ActorID:        uuid.MustParse(admin.ID),
+		ActorRole:      admin.GetRole(),
+		TargetUserID:   &existing.AdminUserId,
+		EventCode:      eventCode,
+		ToStatus:       &existing.Status,
+		Metadata:       metaJSON,
+		CreatedDate:    time.Now(),
+	})
+
+	return nil
 }
 
 func (u *publicRelationUseCase) Delete(moduleId string, id string, adminID string) error {
-	return u.repo.Delete(moduleId, id)
+	err := u.repo.Delete(moduleId, id)
+	if err != nil {
+		return err
+	}
+	if parsedID, parseErr := uuid.Parse(id); parseErr == nil {
+		if actorUUID, aErr := uuid.Parse(adminID); aErr == nil {
+			u.emitKPI(&domain.KPILog{
+				ModuleKey:   domain.ModuleKeyPublicRelations,
+				EntityID:    parsedID,
+				ActorID:     actorUUID,
+				EventCode:   domain.EventPRNewsDeleted,
+				CreatedDate: time.Now(),
+			})
+		}
+	}
+	return nil
 }
 
 func (u *publicRelationUseCase) HideComment(moduleId string, prId string, commentId string, adminID string) error {
-	return u.repo.HideComment(moduleId, prId, commentId)
+	err := u.repo.HideComment(moduleId, prId, commentId)
+	if err != nil {
+		return err
+	}
+	if parsedPrID, parseErr := uuid.Parse(prId); parseErr == nil {
+		if actorUUID, aErr := uuid.Parse(adminID); aErr == nil {
+			metaJSON := fmt.Sprintf(`{"action":"hide_comment","comment_id":%q}`, commentId)
+			u.emitKPI(&domain.KPILog{
+				ModuleKey:   domain.ModuleKeyPublicRelations,
+				EntityID:    parsedPrID,
+				ActorID:     actorUUID,
+				EventCode:   domain.EventPRCommentModerated,
+				Metadata:    metaJSON,
+				CreatedDate: time.Now(),
+			})
+		}
+	}
+	return nil
 }
 
 func (u *publicRelationUseCase) ShowComment(moduleId string, prId string, commentId string, adminID string) error {
-	return u.repo.ShowComment(moduleId, prId, commentId)
+	err := u.repo.ShowComment(moduleId, prId, commentId)
+	if err != nil {
+		return err
+	}
+	if parsedPrID, parseErr := uuid.Parse(prId); parseErr == nil {
+		if actorUUID, aErr := uuid.Parse(adminID); aErr == nil {
+			metaJSON := fmt.Sprintf(`{"action":"show_comment","comment_id":%q}`, commentId)
+			u.emitKPI(&domain.KPILog{
+				ModuleKey:   domain.ModuleKeyPublicRelations,
+				EntityID:    parsedPrID,
+				ActorID:     actorUUID,
+				EventCode:   domain.EventPRCommentModerated,
+				Metadata:    metaJSON,
+				CreatedDate: time.Now(),
+			})
+		}
+	}
+	return nil
 }
 
 func (u *publicRelationUseCase) GetPaginatedNotifications(moduleId string, query domain.PublicRelationNotificationQuery, history bool) (*domain.PaginatedNotificationResponse, error) {
@@ -265,7 +380,33 @@ func (u *publicRelationUseCase) CreateNotification(notification *domain.PublicRe
 	notification.CreatedBy = admin.Name + " " + admin.LastName
 	notification.UpdatedBy = admin.Name + " " + admin.LastName
 
-	return u.repo.CreateNotification(notification)
+	err = u.repo.CreateNotification(notification)
+	if err != nil {
+		return err
+	}
+
+	var deptID *uuid.UUID
+	if len(admin.Departments) > 0 {
+		if dID, parseErr := uuid.Parse(admin.Departments[0].ID); parseErr == nil {
+			deptID = &dID
+		}
+	}
+	metaJSON := fmt.Sprintf(`{"title":%q,"type":%q,"status":%q}`, notification.Title, notification.Type, notification.Status)
+	u.emitKPI(&domain.KPILog{
+		ModuleKey:      domain.ModuleKeyPublicRelations,
+		DepartmentID:   deptID,
+		EntityID:       notification.ID,
+		DocumentNumber: &notification.Title,
+		ActorID:        notification.AdminUserId,
+		ActorRole:      admin.GetRole(),
+		TargetUserID:   &notification.AdminUserId,
+		EventCode:      domain.EventPRNotificationBroadcast,
+		ToStatus:       &notification.Status,
+		Metadata:       metaJSON,
+		CreatedDate:    time.Now(),
+	})
+
+	return nil
 }
 
 // CreateNotificationComposite สร้าง notification แบบ atomic รองรับ 3 modes:
@@ -431,8 +572,30 @@ func (u *publicRelationUseCase) CreateNotificationComposite(
 		return nil, txErr
 	}
 
-	// ส่งแจ้งเตือนไปยัง module_notifications หากสถานะเป็น active หรือ published
+	// Emit PR KPI Event
 	if createdNotif != nil {
+		var deptID *uuid.UUID
+		if len(admin.Departments) > 0 {
+			if dID, parseErr := uuid.Parse(admin.Departments[0].ID); parseErr == nil {
+				deptID = &dID
+			}
+		}
+		metaJSON := fmt.Sprintf(`{"title":%q,"type":%q,"status":%q}`, createdNotif.Title, createdNotif.Type, createdNotif.Status)
+		u.emitKPI(&domain.KPILog{
+			ModuleKey:      domain.ModuleKeyPublicRelations,
+			DepartmentID:   deptID,
+			EntityID:       createdNotif.ID,
+			DocumentNumber: &createdNotif.Title,
+			ActorID:        createdNotif.AdminUserId,
+			ActorRole:      admin.GetRole(),
+			TargetUserID:   &createdNotif.AdminUserId,
+			EventCode:      domain.EventPRNotificationBroadcast,
+			ToStatus:       &createdNotif.Status,
+			Metadata:       metaJSON,
+			CreatedDate:    time.Now(),
+		})
+
+		// ส่งแจ้งเตือนไปยัง module_notifications หากสถานะเป็น active หรือ published
 		statusLower := strings.ToLower(createdNotif.Status)
 		if statusLower == "active" || statusLower == "published" {
 			refID := createdNotif.ID.String()

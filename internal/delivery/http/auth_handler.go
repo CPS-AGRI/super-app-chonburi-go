@@ -93,6 +93,7 @@ func (h *AuthHandler) Refresh(c fiber.Ctx) error {
 			"last_name":   admin.LastName,
 			"role":        admin.Role,
 			"permissions": permissions,
+			"departments": admin.Departments,
 		},
 		"token":        token,
 		"refreshToken": refreshToken,
@@ -136,6 +137,7 @@ func (h *AuthHandler) Me(c fiber.Ctx) error {
 			"last_name":   admin.LastName,
 			"role":        admin.Role,
 			"permissions": permissions,
+			"departments": admin.Departments,
 		},
 	})
 }

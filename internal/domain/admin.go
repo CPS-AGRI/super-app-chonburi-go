@@ -11,6 +11,13 @@ type User interface {
 	GetEmail() string
 	GetRole() string
 }
+const (
+	RoleSuperAdmin = "SuperAdmin"
+	RoleExecutives = "Executives"
+	RoleManagers   = "Managers"
+	RoleEmployees  = "Employees"
+	RoleAppUsers   = "AppUsers"
+)
 
 type AdminRole struct {
 	ID                 string    `gorm:"type:uuid;primaryKey;column:id" json:"id"`

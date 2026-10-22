@@ -253,7 +253,14 @@ func (r *complaintRepository) CreateActivity(activity *domain.ComplaintActivity)
 }
 
 func (r *complaintRepository) Delete(id string) error {
-	return r.db.Delete(&domain.Complaint{}, "id = ?", id).Error
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		_ = tx.Where("module_complaint_id = ?", id).Delete(&domain.ComplaintRatingHistory{}).Error
+		_ = tx.Where("module_complaint_id = ?", id).Delete(&domain.ComplaintActivityImage{}).Error
+		_ = tx.Where("module_complaint_id = ?", id).Delete(&domain.ComplaintActivity{}).Error
+		_ = tx.Where("module_complaint_id = ?", id).Delete(&domain.ComplaintImage{}).Error
+		_ = tx.Where("entity_id = ?", id).Delete(&domain.KPILog{}).Error
+		return tx.Delete(&domain.Complaint{}, "id = ?", id).Error
+	})
 }
 
 func (r *complaintRepository) GetAllowedModuleTypeIDs(deptIDs []string) ([]string, error) {
@@ -286,7 +293,8 @@ func (r *complaintRepository) GetRatingSummaries(summaryType string) ([]domain.C
 				COALESCE(SUM(h.rating_score), 0) AS total_score,
 				COUNT(CASE WHEN h.is_disputed THEN 1 END) AS dispute_count
 			FROM admin_users a
-			LEFT JOIN module_complaint_rating_histories h ON h.assignee_id::text = a.id::text
+			JOIN module_complaint_rating_histories h ON h.assignee_id::text = a.id::text
+			JOIN module_complaints c ON c.id = h.module_complaint_id
 			GROUP BY a.id, a.name, a.last_name
 			HAVING COUNT(h.rating_score) > 0 OR COUNT(CASE WHEN h.is_disputed THEN 1 END) > 0
 		`).Scan(&rows).Error
@@ -328,7 +336,8 @@ func (r *complaintRepository) GetRatingSummaries(summaryType string) ([]domain.C
 				COALESCE(SUM(h.rating_score), 0) AS total_score,
 				COUNT(CASE WHEN h.is_disputed THEN 1 END) AS dispute_count
 			FROM departments d
-			LEFT JOIN module_complaint_rating_histories h ON h.department_id::text = d.id::text
+			JOIN module_complaint_rating_histories h ON h.department_id::text = d.id::text
+			JOIN module_complaints c ON c.id = h.module_complaint_id
 			GROUP BY d.id, d.name
 			HAVING COUNT(h.rating_score) > 0 OR COUNT(CASE WHEN h.is_disputed THEN 1 END) > 0
 		`).Scan(&rows).Error

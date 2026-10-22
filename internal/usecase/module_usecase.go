@@ -1,6 +1,7 @@
 package usecase
 
 import (
+	"strings"
 	"super-app-chonburi-go/internal/domain"
 	"time"
 )
@@ -23,11 +24,30 @@ func (u *moduleUseCase) GetModulesForUser(adminID string) ([]domain.Module, erro
 		return nil, err
 	}
 
-	if admin.Role != nil && admin.Role.Type == "super_admin" {
+	if admin.Role != nil && (strings.EqualFold(admin.Role.Type, domain.RoleSuperAdmin) || strings.EqualFold(admin.Role.Type, "super_admin")) {
 		return u.repo.GetAll()
 	}
 
-	return []domain.Module{}, nil
+	isExecutive := admin.Role != nil && (strings.EqualFold(admin.Role.Type, domain.RoleExecutives) || strings.EqualFold(admin.Role.Type, "executive"))
+
+	// Collect unique modules from assigned departments
+	moduleMap := make(map[string]domain.Module)
+	for _, dept := range admin.Departments {
+		for _, mod := range dept.Modules {
+			// For Executive role, only return modules that have an active dashboard in DB
+			if isExecutive && !mod.IsDashboard {
+				continue
+			}
+			moduleMap[mod.ID] = mod
+		}
+	}
+
+	modules := make([]domain.Module, 0, len(moduleMap))
+	for _, mod := range moduleMap {
+		modules = append(modules, mod)
+	}
+
+	return modules, nil
 }
 
 func (u *moduleUseCase) GetAllModules() ([]domain.Module, error) {
