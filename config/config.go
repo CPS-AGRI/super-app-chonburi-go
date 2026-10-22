@@ -23,6 +23,19 @@ type Config struct {
 	CORSAllowedOrigins string
 	MinIO              MinIOConfig
 	Redis              RedisConfig
+
+	// Fahfon River Microservice (WireGuard: 10.1.2.19:8081)
+	RiverServiceURL     string
+	RiverGo2RTCURL      string
+	RiverMunicipalityID string
+
+	// Fahfon Weather Core Microservice (10.1.2.25:50059)
+	FahfonWeatherBaseURL string
+	FahfonWeatherMapURL  string
+	FahfonServiceKey     string
+
+	// M2M Dashboard Security
+	M2MSecretKey string
 }
 
 type RedisConfig struct {
@@ -132,19 +145,58 @@ func LoadConfig() *Config {
 		corsAllowedOrigins = "http://localhost:3000,http://localhost:3001,http://localhost:5173,https://uat-super-app-chonburi.mueangsmart.com"
 	}
 
+	riverServiceURL := os.Getenv("RIVER_SERVICE_URL")
+	if riverServiceURL == "" {
+		riverServiceURL = "http://10.1.2.19:8081"
+	}
+	riverGo2RTCURL := os.Getenv("RIVER_GO2RTC_URL")
+	if riverGo2RTCURL == "" {
+		riverGo2RTCURL = "http://10.1.2.7:1984"
+	}
+	riverMunicipalityID := os.Getenv("RIVER_MUNICIPALITY_ID")
+	if riverMunicipalityID == "" {
+		riverMunicipalityID = "c04da467-53f7-4076-93e9-54896eedb6c6"
+	}
+	fahfonWeatherBaseURL := os.Getenv("FAHFON_WEATHER_API_URL")
+	if fahfonWeatherBaseURL == "" {
+		fahfonWeatherBaseURL = os.Getenv("WEATHER_SERVICE_URL")
+	}
+	if fahfonWeatherBaseURL == "" {
+		fahfonWeatherBaseURL = "http://10.1.2.25:50059"
+	}
+	fahfonWeatherMapURL := os.Getenv("FAHFON_WEATHER_MAP_URL")
+	if fahfonWeatherMapURL == "" {
+		fahfonWeatherMapURL = "http://10.1.2.25:50059"
+	}
+	fahfonServiceKey := os.Getenv("FAHFON_SERVICE_KEY")
+	if fahfonServiceKey == "" {
+		fahfonServiceKey = "ff_sec_service_key_Prod_7821_wQ9s8Zx2tA"
+	}
+	m2mSecretKey := os.Getenv("M2M_SECRET_KEY")
+	if m2mSecretKey == "" {
+		m2mSecretKey = "chonburi_m2m_sec_99a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4"
+	}
+
 	return &Config{
-		AppEnv:             appEnv,
-		AppPort:            port,
-		AutoMigrate:        getEnvBool("AUTO_MIGRATE", true),
-		DBDsn:              dsn,
-		OrgName:            orgName,
-		OrgLogoURL:         orgLogoURL,
-		FrontendURL:        frontendURL,
-		SMTPHost:           smtpHost,
-		SMTPPort:           smtpPort,
-		SMTPEmail:          smtpEmail,
-		SMTPPassword:       smtpPassword,
-		CORSAllowedOrigins: corsAllowedOrigins,
+		AppEnv:               appEnv,
+		AppPort:              port,
+		AutoMigrate:          getEnvBool("AUTO_MIGRATE", true),
+		DBDsn:                dsn,
+		OrgName:              orgName,
+		OrgLogoURL:           orgLogoURL,
+		FrontendURL:          frontendURL,
+		SMTPHost:             smtpHost,
+		SMTPPort:             smtpPort,
+		SMTPEmail:            smtpEmail,
+		SMTPPassword:         smtpPassword,
+		CORSAllowedOrigins:   corsAllowedOrigins,
+		RiverServiceURL:      riverServiceURL,
+		RiverGo2RTCURL:       riverGo2RTCURL,
+		RiverMunicipalityID:  riverMunicipalityID,
+		FahfonWeatherBaseURL: fahfonWeatherBaseURL,
+		FahfonWeatherMapURL:  fahfonWeatherMapURL,
+		FahfonServiceKey:     fahfonServiceKey,
+		M2MSecretKey:         m2mSecretKey,
 		MinIO: MinIOConfig{
 			Endpoint:        minioEndpoint,
 			AccessKey:       minioAccessKey,
