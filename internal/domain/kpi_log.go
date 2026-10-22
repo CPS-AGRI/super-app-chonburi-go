@@ -136,6 +136,36 @@ type KPISummaryResponse struct {
 	TotalNewsComments   int64   `json:"total_news_comments,omitempty"`
 	TotalPushBroadcasts int64   `json:"total_push_broadcasts,omitempty"`
 	EngagementRate      float64 `json:"engagement_rate,omitempty"`
+
+	TotalCameras          int64              `json:"total_cameras,omitempty"`
+	OnlineCameras         int64              `json:"online_cameras,omitempty"`
+	OfflineCameras        int64              `json:"offline_cameras,omitempty"`
+	CameraUptimeRate      float64            `json:"camera_uptime_rate,omitempty"`
+	TotalViewSessions     int64              `json:"total_view_sessions,omitempty"`
+	TotalWatchDurationMin int64              `json:"total_watch_duration_min,omitempty"`
+	CitizenViewCount      int64              `json:"citizen_view_count,omitempty"`
+	StaffViewCount        int64              `json:"staff_view_count,omitempty"`
+	PublicCameraCount     int64              `json:"public_camera_count,omitempty"`
+	StaffCameraCount      int64              `json:"staff_camera_count,omitempty"`
+	TopCameras            []KPICCTVTopCamera `json:"top_cameras,omitempty"`
+
+	TotalVerificationRequests  int64   `json:"total_verification_requests,omitempty"`
+	ApprovedVerifications      int64   `json:"approved_verifications,omitempty"`
+	RejectedVerifications      int64   `json:"rejected_verifications,omitempty"`
+	PendingVerifications       int64   `json:"pending_verifications,omitempty"`
+	VerificationApprovalRate   float64 `json:"verification_approval_rate,omitempty"`
+	AvgVerificationDurationMin float64 `json:"avg_verification_duration_min,omitempty"`
+	TotalReviewedCases         int64   `json:"total_reviewed_cases,omitempty"`
+}
+
+type KPICCTVTopCamera struct {
+	ID               string `json:"id"`
+	Name             string `json:"name"`
+	Address          string `json:"address"`
+	Status           string `json:"status"`
+	AccessLevel      string `json:"access_level"`
+	TotalViews       int64  `json:"total_views"`
+	TotalDurationMin int64  `json:"total_duration_min"`
 }
 
 type KPIStaffLeaderboardItem struct {
@@ -152,12 +182,23 @@ type KPIStaffLeaderboardItem struct {
 	AvgRating         float64 `json:"avg_rating"`
 	DisputeCount      int64   `json:"dispute_count"`
 
-	// PR Specific Staff Metrics
 	PublishedNewsCount    int64 `json:"published_news_count,omitempty"`
 	TotalViewsGenerated   int64 `json:"total_views_generated,omitempty"`
 	TotalLikesReceived    int64 `json:"total_likes_received,omitempty"`
 	TotalCommentsReceived int64 `json:"total_comments_received,omitempty"`
 	PushBroadcastCount    int64 `json:"push_broadcast_count,omitempty"`
+
+	ManagedCamerasCount     int64   `json:"managed_cameras_count,omitempty"`
+	OnlineCamerasCount      int64   `json:"online_cameras_count,omitempty"`
+	CameraHealthRate        float64 `json:"camera_health_rate,omitempty"`
+	SurveillanceSessions    int64   `json:"surveillance_sessions,omitempty"`
+	SurveillanceDurationMin int64   `json:"surveillance_duration_min,omitempty"`
+
+	VerifiedCount      int64   `json:"verified_count,omitempty"`
+	RejectedCount      int64   `json:"rejected_count,omitempty"`
+	TotalAuditedCount  int64   `json:"total_audited_count,omitempty"`
+	ApprovalPercentage float64 `json:"approval_percentage,omitempty"`
+	AvgProcessingMin   float64 `json:"avg_processing_min,omitempty"`
 }
 
 type KPIManagerScorecardItem struct {
@@ -190,11 +231,54 @@ type KPIPersonalCaseItem struct {
 	Metadata            string    `json:"metadata"`
 }
 
+type KPIPRRecentNewsItem struct {
+	ID          string    `json:"id"`
+	Title       string    `json:"title"`
+	Type        string    `json:"type"`
+	Status      string    `json:"status"`
+	Views       int64     `json:"views"`
+	Likes       int64     `json:"likes"`
+	Comments    int64     `json:"comments"`
+	CreatedDate time.Time `json:"created_date"`
+}
+
+type KPIVerifyRecentCaseItem struct {
+	UserID          string    `json:"user_id"`
+	CitizenName     string    `json:"citizen_name"`
+	Status          string    `json:"status"`
+	District        string    `json:"district"`
+	Subdistrict     string    `json:"subdistrict"`
+	RejectionReason string    `json:"rejection_reason"`
+	CreatedDate     time.Time `json:"created_date"`
+	VerifiedDate    time.Time `json:"verified_date"`
+	DurationMin     int64     `json:"duration_min"`
+}
+
+type KPICCTVManagedCamera struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Address     string `json:"address"`
+	Status      string `json:"status"`
+	AccessLevel string `json:"access_level"`
+	ViewCount   int64  `json:"view_count"`
+}
+
+type KPICCTVSurveillanceLog struct {
+	ID              string `json:"id"`
+	CameraName      string `json:"camera_name"`
+	StartedAt       string `json:"started_at"`
+	DurationSeconds int    `json:"duration_seconds"`
+	DurationText    string `json:"duration_text"`
+	DeviceType      string `json:"device_type"`
+}
+
 type KPIStaffDetailResponse struct {
 	UserID            string                `json:"user_id"`
 	Name              string                `json:"name"`
 	LastName          string                `json:"last_name"`
 	DepartmentName    string                `json:"department_name"`
+	RoleType          string                `json:"role_type,omitempty"`
+	Position          string                `json:"position,omitempty"`
 	TotalAssigned     int64                 `json:"total_assigned"`
 	TotalResolved     int64                 `json:"total_resolved"`
 	AvgMTTRHours      float64               `json:"avg_mttr_hours"`
@@ -203,6 +287,28 @@ type KPIStaffDetailResponse struct {
 	AvgRating         float64               `json:"avg_rating"`
 	DisputeCount      int64                 `json:"dispute_count"`
 	RecentCases       []KPIPersonalCaseItem `json:"recent_cases"`
+
+	PublishedNewsCount    int64                 `json:"published_news_count,omitempty"`
+	TotalViewsGenerated   int64                 `json:"total_views_generated,omitempty"`
+	TotalLikesReceived    int64                 `json:"total_likes_received,omitempty"`
+	TotalCommentsReceived int64                 `json:"total_comments_received,omitempty"`
+	PushBroadcastCount    int64                 `json:"push_broadcast_count,omitempty"`
+	RecentNews            []KPIPRRecentNewsItem `json:"recent_news,omitempty"`
+
+	ManagedCamerasCount     int64                    `json:"managed_cameras_count,omitempty"`
+	OnlineCamerasCount      int64                    `json:"online_cameras_count,omitempty"`
+	CameraHealthRate        float64                  `json:"camera_health_rate,omitempty"`
+	SurveillanceSessions    int64                    `json:"surveillance_sessions,omitempty"`
+	SurveillanceDurationMin int64                    `json:"surveillance_duration_min,omitempty"`
+	ManagedCameras          []KPICCTVManagedCamera   `json:"managed_cameras,omitempty"`
+	RecentSurveillanceLogs  []KPICCTVSurveillanceLog `json:"recent_surveillance_logs,omitempty"`
+
+	VerifiedCount       int64                     `json:"verified_count,omitempty"`
+	RejectedCount       int64                     `json:"rejected_count,omitempty"`
+	TotalAuditedCount   int64                     `json:"total_audited_count,omitempty"`
+	ApprovalPercentage  float64                   `json:"approval_percentage,omitempty"`
+	AvgProcessingMin    float64                   `json:"avg_processing_min,omitempty"`
+	RecentVerifyCases   []KPIVerifyRecentCaseItem `json:"recent_verify_cases,omitempty"`
 }
 
 type KPIManagerDispatchCaseItem struct {

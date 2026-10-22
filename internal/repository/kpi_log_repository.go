@@ -146,6 +146,194 @@ func (r *kpiLogRepository) GetKPISummary(filter domain.KPIQueryFilter) (*domain.
 		}, nil
 	}
 
+	if filter.ModuleKey == domain.ModuleKeyCCTV {
+		type cameraSummaryRaw struct {
+			TotalCameras      int64 `gorm:"column:total_cameras"`
+			OnlineCameras     int64 `gorm:"column:online_cameras"`
+			OfflineCameras    int64 `gorm:"column:offline_cameras"`
+			PublicCameraCount int64 `gorm:"column:public_cameras"`
+			StaffCameraCount  int64 `gorm:"column:staff_cameras"`
+		}
+		var camRaw cameraSummaryRaw
+		camQuery := r.db.Table("module_cctv").
+			Select(`
+				COUNT(*) as total_cameras,
+				COUNT(CASE WHEN status = 'ONLINE' THEN 1 END) as online_cameras,
+				COUNT(CASE WHEN status = 'OFFLINE' THEN 1 END) as offline_cameras,
+				COUNT(CASE WHEN access_level = 'PUBLIC' THEN 1 END) as public_cameras,
+				COUNT(CASE WHEN access_level = 'STAFF_ONLY' THEN 1 END) as staff_cameras
+			`).
+			Where("deleted_at IS NULL")
+
+		if filter.UserID != "" {
+			camQuery = camQuery.Where("created_by::text = ?", filter.UserID)
+		}
+		_ = camQuery.Scan(&camRaw).Error
+
+		var uptimeRate float64
+		if camRaw.TotalCameras > 0 {
+			uptimeRate = math.Round((float64(camRaw.OnlineCameras)/float64(camRaw.TotalCameras))*1000) / 10
+		}
+
+		type viewLogsSummaryRaw struct {
+			TotalSessions    int64 `gorm:"column:total_sessions"`
+			TotalDurationSec int64 `gorm:"column:total_duration_sec"`
+			CitizenSessions  int64 `gorm:"column:citizen_sessions"`
+			StaffSessions    int64 `gorm:"column:staff_sessions"`
+		}
+		var logRaw viewLogsSummaryRaw
+		logQuery := r.db.Table("module_cctv_view_logs l").
+			Select(`
+				COUNT(*) as total_sessions,
+				COALESCE(SUM(l.duration_seconds), 0) as total_duration_sec,
+				COUNT(CASE WHEN l.policy_type = 'UserPolicy' THEN 1 END) as citizen_sessions,
+				COUNT(CASE WHEN l.policy_type = 'AdminPolicy' THEN 1 END) as staff_sessions
+			`)
+
+		if filter.UserID != "" {
+			logQuery = logQuery.Where("l.cctv_id IN (SELECT id FROM module_cctv WHERE created_by::text = ?)", filter.UserID)
+		}
+		if filter.StartDate != nil {
+			logQuery = logQuery.Where("l.started_at >= ?", filter.StartDate)
+		}
+		if filter.EndDate != nil {
+			logQuery = logQuery.Where("l.started_at <= ?", filter.EndDate)
+		}
+		_ = logQuery.Scan(&logRaw).Error
+
+		var totalWatchMin int64
+		if logRaw.TotalDurationSec > 0 {
+			totalWatchMin = logRaw.TotalDurationSec / 60
+			if totalWatchMin < 1 {
+				totalWatchMin = 1
+			}
+		}
+
+		type topCameraRow struct {
+			ID               string `gorm:"column:id"`
+			Name             string `gorm:"column:name"`
+			Address          string `gorm:"column:address"`
+			Status           string `gorm:"column:status"`
+			AccessLevel      string `gorm:"column:access_level"`
+			TotalViews       int64  `gorm:"column:total_views"`
+			TotalDurationSec int64  `gorm:"column:total_duration_sec"`
+		}
+		var topRows []topCameraRow
+		topCamQuery := r.db.Table("module_cctv c").
+			Select(`
+				c.id::text as id,
+				c.name,
+				COALESCE(c.address, '') as address,
+				c.status,
+				c.access_level,
+				COUNT(l.id) as total_views,
+				COALESCE(SUM(l.duration_seconds), 0) as total_duration_sec
+			`).
+			Joins("LEFT JOIN module_cctv_view_logs l ON l.cctv_id = c.id").
+			Where("c.deleted_at IS NULL")
+
+		if filter.UserID != "" {
+			topCamQuery = topCamQuery.Where("c.created_by::text = ?", filter.UserID)
+		}
+		if filter.StartDate != nil {
+			topCamQuery = topCamQuery.Where("l.started_at IS NULL OR l.started_at >= ?", filter.StartDate)
+		}
+		if filter.EndDate != nil {
+			topCamQuery = topCamQuery.Where("l.started_at IS NULL OR l.started_at <= ?", filter.EndDate)
+		}
+		_ = topCamQuery.
+			Group("c.id, c.name, c.address, c.status, c.access_level").
+			Order("total_views DESC, total_duration_sec DESC").
+			Limit(5).
+			Scan(&topRows).Error
+
+		topCameras := make([]domain.KPICCTVTopCamera, len(topRows))
+		for i, rItem := range topRows {
+			mins := rItem.TotalDurationSec / 60
+			topCameras[i] = domain.KPICCTVTopCamera{
+				ID:               rItem.ID,
+				Name:             rItem.Name,
+				Address:          rItem.Address,
+				Status:           rItem.Status,
+				AccessLevel:      rItem.AccessLevel,
+				TotalViews:       rItem.TotalViews,
+				TotalDurationMin: mins,
+			}
+		}
+
+		thresholds, _ := r.GetThresholds(domain.ModuleKeyCCTV)
+
+		return &domain.KPISummaryResponse{
+			TotalCameras:          camRaw.TotalCameras,
+			OnlineCameras:         camRaw.OnlineCameras,
+			OfflineCameras:        camRaw.OfflineCameras,
+			CameraUptimeRate:      uptimeRate,
+			TotalViewSessions:     logRaw.TotalSessions,
+			TotalWatchDurationMin: totalWatchMin,
+			CitizenViewCount:      logRaw.CitizenSessions,
+			StaffViewCount:        logRaw.StaffSessions,
+			PublicCameraCount:     camRaw.PublicCameraCount,
+			StaffCameraCount:      camRaw.StaffCameraCount,
+			TopCameras:            topCameras,
+			Thresholds:            thresholds,
+		}, nil
+	}
+
+	if filter.ModuleKey == domain.ModuleKeyUserVerify {
+		type verifySummaryRaw struct {
+			TotalRequests  int64   `gorm:"column:total_requests"`
+			ApprovedCount  int64   `gorm:"column:approved_count"`
+			RejectedCount  int64   `gorm:"column:rejected_count"`
+			PendingCount   int64   `gorm:"column:pending_count"`
+			AvgDurationSec float64 `gorm:"column:avg_duration_sec"`
+		}
+		var raw verifySummaryRaw
+		q := r.db.Table("user_informations").
+			Select(`
+				COUNT(*) as total_requests,
+				COUNT(CASE WHEN verification_status = 'verified' THEN 1 END) as approved_count,
+				COUNT(CASE WHEN verification_status = 'rejected' THEN 1 END) as rejected_count,
+				COUNT(CASE WHEN verification_status = 'pending' THEN 1 END) as pending_count,
+				COALESCE(AVG(CASE 
+					WHEN verification_status IN ('verified', 'rejected') 
+					     AND COALESCE(verified_date, updated_date) > created_date 
+					THEN EXTRACT(EPOCH FROM (COALESCE(verified_date, updated_date) - created_date)) 
+				END), 0) as avg_duration_sec
+			`)
+
+		if filter.UserID != "" {
+			q = q.Where("updated_by = ?", filter.UserID)
+		}
+		if filter.StartDate != nil {
+			q = q.Where("created_date >= ?", filter.StartDate)
+		}
+		if filter.EndDate != nil {
+			q = q.Where("created_date <= ?", filter.EndDate)
+		}
+		_ = q.Scan(&raw).Error
+
+		var approvalRate float64
+		reviewedCount := raw.ApprovedCount + raw.RejectedCount
+		if reviewedCount > 0 {
+			approvalRate = math.Round((float64(raw.ApprovedCount)/float64(reviewedCount))*1000) / 10
+		}
+
+		avgDurationMin := math.Round((raw.AvgDurationSec/60.0)*10) / 10
+
+		thresholds, _ := r.GetThresholds(domain.ModuleKeyUserVerify)
+
+		return &domain.KPISummaryResponse{
+			TotalVerificationRequests:  raw.TotalRequests,
+			ApprovedVerifications:      raw.ApprovedCount,
+			RejectedVerifications:      raw.RejectedCount,
+			PendingVerifications:       raw.PendingCount,
+			VerificationApprovalRate:   approvalRate,
+			AvgVerificationDurationMin: avgDurationMin,
+			TotalReviewedCases:         reviewedCount,
+			Thresholds:                 thresholds,
+		}, nil
+	}
+
 	query := r.db.Table("kpi_activity_logs")
 
 	if filter.ModuleKey != "" {
@@ -401,6 +589,180 @@ func (r *kpiLogRepository) GetStaffLeaderboard(filter domain.KPIQueryFilter) ([]
 		return items, nil
 	}
 
+	if filter.ModuleKey == domain.ModuleKeyCCTV {
+		var logDateCond string
+		var logArgs []interface{}
+		if filter.StartDate != nil {
+			logDateCond += " AND started_at >= ?"
+			logArgs = append(logArgs, filter.StartDate)
+		}
+		if filter.EndDate != nil {
+			logDateCond += " AND started_at <= ?"
+			logArgs = append(logArgs, filter.EndDate)
+		}
+
+		adminFilterSQL := ""
+		var adminFilterArgs []interface{}
+		if filter.UserID != "" {
+			adminFilterSQL += " AND a.id::text = ?"
+			adminFilterArgs = append(adminFilterArgs, filter.UserID)
+		}
+		if filter.DepartmentID != "" {
+			adminFilterSQL += " AND EXISTS (SELECT 1 FROM admin_departments ad WHERE ad.admin_id = a.id AND ad.department_id::text = ?)"
+			adminFilterArgs = append(adminFilterArgs, filter.DepartmentID)
+		} else if len(filter.DepartmentIDs) > 0 {
+			adminFilterSQL += " AND EXISTS (SELECT 1 FROM admin_departments ad WHERE ad.admin_id = a.id AND ad.department_id::text IN (?))"
+			adminFilterArgs = append(adminFilterArgs, filter.DepartmentIDs)
+		}
+
+		sql := fmt.Sprintf(`
+			WITH camera_stats AS (
+				SELECT 
+					created_by::text as admin_id,
+					COUNT(id) as total_cameras,
+					COUNT(CASE WHEN status = 'ONLINE' THEN 1 END) as online_cameras,
+					COUNT(CASE WHEN status = 'OFFLINE' THEN 1 END) as offline_cameras
+				FROM module_cctv
+				WHERE deleted_at IS NULL AND created_by IS NOT NULL
+				GROUP BY created_by
+			),
+			surveillance_stats AS (
+				SELECT 
+					user_id::text as admin_id,
+					COUNT(id) as total_sessions,
+					COALESCE(SUM(duration_seconds) / 60, 0) as total_duration_min
+				FROM module_cctv_view_logs
+				WHERE policy_type = 'AdminPolicy' %s
+				GROUP BY user_id
+			)
+			SELECT 
+				a.id::text as user_id,
+				COALESCE(a.name, 'เจ้าหน้าที่') as name,
+				COALESCE(a.last_name, '') as last_name,
+				COALESCE(ar.type, '') as role_type,
+				COALESCE(a.position, '') as position,
+				COALESCE((
+					SELECT d2.name 
+					FROM admin_departments ad 
+					JOIN departments d2 ON d2.id = ad.department_id 
+					WHERE ad.admin_id = a.id 
+					LIMIT 1
+				), '-') as department_name,
+				COALESCE(cs.total_cameras, 0) as managed_cameras_count,
+				COALESCE(cs.online_cameras, 0) as online_cameras_count,
+				CASE 
+					WHEN COALESCE(cs.total_cameras, 0) > 0 
+					THEN ROUND((COALESCE(cs.online_cameras, 0)::numeric / cs.total_cameras::numeric) * 100.0, 1)
+					ELSE 100.0 
+				END as camera_health_rate,
+				COALESCE(ss.total_sessions, 0) as surveillance_sessions,
+				COALESCE(ss.total_duration_min, 0) as surveillance_duration_min
+			FROM admin_users a
+			LEFT JOIN admin_roles ar ON ar.id = a.role_id
+			LEFT JOIN camera_stats cs ON cs.admin_id = a.id::text
+			LEFT JOIN surveillance_stats ss ON ss.admin_id = a.id::text
+			WHERE (COALESCE(cs.total_cameras, 0) > 0 OR COALESCE(ss.total_sessions, 0) > 0)
+			%s
+			ORDER BY managed_cameras_count DESC, surveillance_sessions DESC
+			LIMIT 50
+		`, logDateCond, adminFilterSQL)
+
+		allArgs := append(logArgs, adminFilterArgs...)
+		var items []domain.KPIStaffLeaderboardItem
+		if err := r.db.Raw(sql, allArgs...).Scan(&items).Error; err != nil {
+			return nil, err
+		}
+		if items == nil {
+			items = []domain.KPIStaffLeaderboardItem{}
+		}
+		return items, nil
+	}
+
+	if filter.ModuleKey == domain.ModuleKeyUserVerify {
+		var verifyDateCond string
+		var verifyArgs []interface{}
+		if filter.StartDate != nil {
+			verifyDateCond += " AND (created_date >= ?)"
+			verifyArgs = append(verifyArgs, filter.StartDate)
+		}
+		if filter.EndDate != nil {
+			verifyDateCond += " AND (created_date <= ?)"
+			verifyArgs = append(verifyArgs, filter.EndDate)
+		}
+
+		adminFilterSQL := ""
+		var adminFilterArgs []interface{}
+		if filter.UserID != "" {
+			adminFilterSQL += " AND a.id::text = ?"
+			adminFilterArgs = append(adminFilterArgs, filter.UserID)
+		}
+		if filter.DepartmentID != "" {
+			adminFilterSQL += " AND EXISTS (SELECT 1 FROM admin_departments ad WHERE ad.admin_id = a.id AND ad.department_id::text = ?)"
+			adminFilterArgs = append(adminFilterArgs, filter.DepartmentID)
+		} else if len(filter.DepartmentIDs) > 0 {
+			adminFilterSQL += " AND EXISTS (SELECT 1 FROM admin_departments ad WHERE ad.admin_id = a.id AND ad.department_id::text IN (?))"
+			adminFilterArgs = append(adminFilterArgs, filter.DepartmentIDs)
+		}
+
+		sql := fmt.Sprintf(`
+			WITH verify_stats AS (
+				SELECT 
+					updated_by as admin_id,
+					COUNT(CASE WHEN verification_status = 'verified' THEN 1 END) as verified_count,
+					COUNT(CASE WHEN verification_status = 'rejected' THEN 1 END) as rejected_count,
+					COUNT(CASE WHEN verification_status IN ('verified', 'rejected') THEN 1 END) as total_audited,
+					COALESCE(AVG(CASE 
+						WHEN verification_status IN ('verified', 'rejected') 
+						     AND COALESCE(verified_date, updated_date) > created_date 
+						THEN EXTRACT(EPOCH FROM (COALESCE(verified_date, updated_date) - created_date)) / 60.0 
+					END), 0) as avg_processing_min
+				FROM user_informations
+				WHERE updated_by IS NOT NULL AND updated_by != '' %s
+				GROUP BY updated_by
+			)
+			SELECT 
+				a.id::text as user_id,
+				COALESCE(a.name, 'เจ้าหน้าที่') as name,
+				COALESCE(a.last_name, '') as last_name,
+				COALESCE(ar.type, '') as role_type,
+				COALESCE(a.position, '') as position,
+				COALESCE((
+					SELECT d2.name 
+					FROM admin_departments ad 
+					JOIN departments d2 ON d2.id = ad.department_id 
+					WHERE ad.admin_id = a.id 
+					LIMIT 1
+				), '-') as department_name,
+				COALESCE(vs.verified_count, 0) as verified_count,
+				COALESCE(vs.rejected_count, 0) as rejected_count,
+				COALESCE(vs.total_audited, 0) as total_audited_count,
+				CASE 
+					WHEN COALESCE(vs.total_audited, 0) > 0 
+					THEN ROUND((COALESCE(vs.verified_count, 0)::numeric / vs.total_audited::numeric) * 100.0, 1)
+					ELSE 0 
+				END as approval_percentage,
+				ROUND(COALESCE(vs.avg_processing_min, 0)::numeric, 1) as avg_processing_min
+			FROM admin_users a
+			LEFT JOIN admin_roles ar ON ar.id = a.role_id
+			JOIN verify_stats vs ON vs.admin_id = a.id::text
+			WHERE vs.total_audited > 0
+			%s
+			ORDER BY total_audited_count DESC, approval_percentage DESC
+			LIMIT 50
+		`, verifyDateCond, adminFilterSQL)
+
+		allArgs := append(verifyArgs, adminFilterArgs...)
+
+		var items []domain.KPIStaffLeaderboardItem
+		if err := r.db.Raw(sql, allArgs...).Scan(&items).Error; err != nil {
+			return nil, err
+		}
+		if items == nil {
+			items = []domain.KPIStaffLeaderboardItem{}
+		}
+		return items, nil
+	}
+
 	whereSQL := "WHERE k.target_user_id IS NOT NULL AND COALESCE(ar.type, '') NOT IN ('SuperAdmin', 'Executives') AND COALESCE(a.position, '') NOT ILIKE '%superadmin%' AND COALESCE(a.position, '') NOT ILIKE '%ผู้บริหาร%'"
 	args := []interface{}{}
 
@@ -602,7 +964,450 @@ func (r *kpiLogRepository) GetManagerScorecard(filter domain.KPIQueryFilter) ([]
 	return items, nil
 }
 
+func (r *kpiLogRepository) getPRStaffDetail(userID string, filter domain.KPIQueryFilter) (*domain.KPIStaffDetailResponse, error) {
+	type adminInfo struct {
+		Name           string `gorm:"column:name"`
+		LastName       string `gorm:"column:last_name"`
+		DepartmentName string `gorm:"column:department_name"`
+		RoleType       string `gorm:"column:role_type"`
+		Position       string `gorm:"column:position"`
+	}
+	var info adminInfo
+	adminSQL := `
+		SELECT 
+			a.name, 
+			a.last_name, 
+			COALESCE(ar.type, '') as role_type,
+			COALESCE(a.position, '') as position,
+			COALESCE(d.name, '-') as department_name
+		FROM admin_users a
+		LEFT JOIN admin_roles ar ON ar.id = a.role_id
+		LEFT JOIN admin_departments ad ON ad.admin_id = a.id
+		LEFT JOIN departments d ON d.id = ad.department_id
+		WHERE a.id = ?
+		LIMIT 1
+	`
+	_ = r.db.Raw(adminSQL, userID).Scan(&info).Error
+
+	var prDateCond string
+	var prArgs []interface{}
+	prArgs = append(prArgs, userID)
+	if filter.StartDate != nil {
+		prDateCond += " AND pr.created_date >= ?"
+		prArgs = append(prArgs, filter.StartDate)
+	}
+	if filter.EndDate != nil {
+		prDateCond += " AND pr.created_date <= ?"
+		prArgs = append(prArgs, filter.EndDate)
+	}
+
+	type prSummaryStats struct {
+		PublishedCount int64 `gorm:"column:published_count"`
+		TotalViews     int64 `gorm:"column:total_views"`
+		TotalLikes     int64 `gorm:"column:total_likes"`
+		TotalComments  int64 `gorm:"column:total_comments"`
+	}
+	var prStats prSummaryStats
+	prSQL := fmt.Sprintf(`
+		SELECT 
+			COUNT(DISTINCT pr.id) as published_count,
+			COALESCE(SUM(vc.count), 0) as total_views,
+			COALESCE(SUM(lk.likes_count), 0) as total_likes,
+			COALESCE(SUM(cm.comments_count), 0) as total_comments
+		FROM module_public_relations pr
+		LEFT JOIN module_public_relation_visitor_count vc ON vc.module_public_relation_id = pr.id
+		LEFT JOIN (
+			SELECT module_public_relation_id, COUNT(*) as likes_count
+			FROM module_public_relation_likes
+			GROUP BY module_public_relation_id
+		) lk ON lk.module_public_relation_id = pr.id
+		LEFT JOIN (
+			SELECT module_public_relation_id, COUNT(*) as comments_count
+			FROM module_public_relation_comments
+			GROUP BY module_public_relation_id
+		) cm ON cm.module_public_relation_id = pr.id
+		WHERE pr.admin_user_id = ? %s
+	`, prDateCond)
+	_ = r.db.Raw(prSQL, prArgs...).Scan(&prStats).Error
+
+	var notifCount int64
+	var notifDateCond string
+	notifArgs := []interface{}{userID}
+	if filter.StartDate != nil {
+		notifDateCond += " AND created_date >= ?"
+		notifArgs = append(notifArgs, filter.StartDate)
+	}
+	if filter.EndDate != nil {
+		notifDateCond += " AND created_date <= ?"
+		notifArgs = append(notifArgs, filter.EndDate)
+	}
+	notifSQL := fmt.Sprintf(`
+		SELECT COUNT(*) 
+		FROM module_public_relation_notifications 
+		WHERE admin_user_id = ? %s
+	`, notifDateCond)
+	_ = r.db.Raw(notifSQL, notifArgs...).Scan(&notifCount).Error
+
+	type recentNewsRow struct {
+		ID          string    `gorm:"column:id"`
+		Title       string    `gorm:"column:title"`
+		Type        string    `gorm:"column:type"`
+		Status      string    `gorm:"column:status"`
+		Views       int64     `gorm:"column:views"`
+		Likes       int64     `gorm:"column:likes"`
+		Comments    int64     `gorm:"column:comments"`
+		CreatedDate time.Time `gorm:"column:created_date"`
+	}
+	var recentRows []recentNewsRow
+	recentNewsSQL := fmt.Sprintf(`
+		SELECT 
+			pr.id::text as id,
+			COALESCE(pr.title, '-') as title,
+			COALESCE(pr.type, 'general') as type,
+			COALESCE(pr.status, 'published') as status,
+			COALESCE(vc.count, 0) as views,
+			COALESCE(lk.likes_count, 0) as likes,
+			COALESCE(cm.comments_count, 0) as comments,
+			pr.created_date
+		FROM module_public_relations pr
+		LEFT JOIN module_public_relation_visitor_count vc ON vc.module_public_relation_id = pr.id
+		LEFT JOIN (
+			SELECT module_public_relation_id, COUNT(*) as likes_count
+			FROM module_public_relation_likes
+			GROUP BY module_public_relation_id
+		) lk ON lk.module_public_relation_id = pr.id
+		LEFT JOIN (
+			SELECT module_public_relation_id, COUNT(*) as comments_count
+			FROM module_public_relation_comments
+			GROUP BY module_public_relation_id
+		) cm ON cm.module_public_relation_id = pr.id
+		WHERE pr.admin_user_id = ? %s
+		ORDER BY pr.created_date DESC
+		LIMIT 20
+	`, prDateCond)
+	_ = r.db.Raw(recentNewsSQL, prArgs...).Scan(&recentRows).Error
+
+	recentNews := make([]domain.KPIPRRecentNewsItem, 0, len(recentRows))
+	for _, row := range recentRows {
+		recentNews = append(recentNews, domain.KPIPRRecentNewsItem{
+			ID:          row.ID,
+			Title:       row.Title,
+			Type:        row.Type,
+			Status:      row.Status,
+			Views:       row.Views,
+			Likes:       row.Likes,
+			Comments:    row.Comments,
+			CreatedDate: row.CreatedDate,
+		})
+	}
+
+	return &domain.KPIStaffDetailResponse{
+		UserID:                userID,
+		Name:                  info.Name,
+		LastName:              info.LastName,
+		DepartmentName:        info.DepartmentName,
+		RoleType:              info.RoleType,
+		Position:              info.Position,
+		PublishedNewsCount:    prStats.PublishedCount,
+		TotalViewsGenerated:   prStats.TotalViews,
+		TotalLikesReceived:    prStats.TotalLikes,
+		TotalCommentsReceived: prStats.TotalComments,
+		PushBroadcastCount:    notifCount,
+		RecentNews:            recentNews,
+		RecentCases:           []domain.KPIPersonalCaseItem{},
+	}, nil
+}
+
+func (r *kpiLogRepository) getCCTVStaffDetail(userID string, filter domain.KPIQueryFilter) (*domain.KPIStaffDetailResponse, error) {
+	type adminInfo struct {
+		Name           string `gorm:"column:name"`
+		LastName       string `gorm:"column:last_name"`
+		RoleType       string `gorm:"column:role_type"`
+		Position       string `gorm:"column:position"`
+		DepartmentName string `gorm:"column:department_name"`
+	}
+	var info adminInfo
+	adminSQL := `
+		SELECT 
+			a.name, 
+			a.last_name, 
+			COALESCE(ar.type, '') as role_type,
+			COALESCE(a.position, '') as position,
+			COALESCE(d.name, '-') as department_name
+		FROM admin_users a
+		LEFT JOIN admin_roles ar ON ar.id = a.role_id
+		LEFT JOIN admin_departments ad ON ad.admin_id = a.id
+		LEFT JOIN departments d ON d.id = ad.department_id
+		WHERE a.id = ?
+		LIMIT 1
+	`
+	_ = r.db.Raw(adminSQL, userID).Scan(&info).Error
+
+	type camStats struct {
+		TotalCameras  int64 `gorm:"column:total_cameras"`
+		OnlineCameras int64 `gorm:"column:online_cameras"`
+	}
+	var cs camStats
+	_ = r.db.Table("module_cctv").
+		Select("COUNT(*) as total_cameras, COUNT(CASE WHEN status = 'ONLINE' THEN 1 END) as online_cameras").
+		Where("deleted_at IS NULL AND created_by::text = ?", userID).
+		Scan(&cs).Error
+
+	var healthRate float64
+	if cs.TotalCameras > 0 {
+		healthRate = math.Round((float64(cs.OnlineCameras)/float64(cs.TotalCameras))*1000) / 10
+	}
+
+	type survStats struct {
+		TotalSessions int64 `gorm:"column:total_sessions"`
+		TotalDuration int64 `gorm:"column:total_duration"`
+	}
+	var ss survStats
+	survQuery := r.db.Table("module_cctv_view_logs").
+		Select("COUNT(*) as total_sessions, COALESCE(SUM(duration_seconds)/60, 0) as total_duration").
+		Where("user_id::text = ? AND policy_type = 'AdminPolicy'", userID)
+	if filter.StartDate != nil {
+		survQuery = survQuery.Where("started_at >= ?", filter.StartDate)
+	}
+	if filter.EndDate != nil {
+		survQuery = survQuery.Where("started_at <= ?", filter.EndDate)
+	}
+	_ = survQuery.Scan(&ss).Error
+
+	type managedCamRow struct {
+		ID          string `gorm:"column:id"`
+		Name        string `gorm:"column:name"`
+		Address     string `gorm:"column:address"`
+		Status      string `gorm:"column:status"`
+		AccessLevel string `gorm:"column:access_level"`
+		ViewCount   int64  `gorm:"column:view_count"`
+	}
+	var camRows []managedCamRow
+	_ = r.db.Table("module_cctv c").
+		Select("c.id::text as id, c.name, COALESCE(c.address, '') as address, c.status, c.access_level, COUNT(l.id) as view_count").
+		Joins("LEFT JOIN module_cctv_view_logs l ON l.cctv_id = c.id").
+		Where("c.deleted_at IS NULL AND c.created_by::text = ?", userID).
+		Group("c.id, c.name, c.address, c.status, c.access_level").
+		Order("c.created_at DESC").
+		Scan(&camRows).Error
+
+	managedCameras := make([]domain.KPICCTVManagedCamera, len(camRows))
+	for i, c := range camRows {
+		managedCameras[i] = domain.KPICCTVManagedCamera{
+			ID:          c.ID,
+			Name:        c.Name,
+			Address:     c.Address,
+			Status:      c.Status,
+			AccessLevel: c.AccessLevel,
+			ViewCount:   c.ViewCount,
+		}
+	}
+
+	type survLogRow struct {
+		ID              string    `gorm:"column:id"`
+		CameraName      string    `gorm:"column:camera_name"`
+		StartedAt       time.Time `gorm:"column:started_at"`
+		DurationSeconds int       `gorm:"column:duration_seconds"`
+		DeviceType      string    `gorm:"column:device_type"`
+	}
+	var logRows []survLogRow
+	survLogQuery := r.db.Table("module_cctv_view_logs l").
+		Select("l.id::text as id, COALESCE(c.name, 'กล้องวงจรปิด') as camera_name, l.started_at, l.duration_seconds, COALESCE(l.device_type, 'Desktop') as device_type").
+		Joins("LEFT JOIN module_cctv c ON c.id = l.cctv_id").
+		Where("l.user_id::text = ? AND l.policy_type = 'AdminPolicy'", userID)
+	if filter.StartDate != nil {
+		survLogQuery = survLogQuery.Where("l.started_at >= ?", filter.StartDate)
+	}
+	if filter.EndDate != nil {
+		survLogQuery = survLogQuery.Where("l.started_at <= ?", filter.EndDate)
+	}
+	_ = survLogQuery.Order("l.started_at DESC").Limit(20).Scan(&logRows).Error
+
+	survLogs := make([]domain.KPICCTVSurveillanceLog, len(logRows))
+	for i, l := range logRows {
+		mins := l.DurationSeconds / 60
+		if mins < 1 && l.DurationSeconds > 0 {
+			mins = 1
+		}
+		survLogs[i] = domain.KPICCTVSurveillanceLog{
+			ID:              l.ID,
+			CameraName:      l.CameraName,
+			StartedAt:       l.StartedAt.Format("02/01/2006 15:04"),
+			DurationSeconds: l.DurationSeconds,
+			DurationText:    fmt.Sprintf("%d นาที", mins),
+			DeviceType:      l.DeviceType,
+		}
+	}
+
+	return &domain.KPIStaffDetailResponse{
+		UserID:                  userID,
+		Name:                    info.Name,
+		LastName:                info.LastName,
+		DepartmentName:          info.DepartmentName,
+		RoleType:                info.RoleType,
+		Position:                info.Position,
+		ManagedCamerasCount:     cs.TotalCameras,
+		OnlineCamerasCount:      cs.OnlineCameras,
+		CameraHealthRate:        healthRate,
+		SurveillanceSessions:    ss.TotalSessions,
+		SurveillanceDurationMin: ss.TotalDuration,
+		ManagedCameras:          managedCameras,
+		RecentSurveillanceLogs:  survLogs,
+		RecentCases:             []domain.KPIPersonalCaseItem{},
+	}, nil
+}
+
+func (r *kpiLogRepository) getVerifyStaffDetail(userID string, filter domain.KPIQueryFilter) (*domain.KPIStaffDetailResponse, error) {
+	type adminInfo struct {
+		Name           string `gorm:"column:name"`
+		LastName       string `gorm:"column:last_name"`
+		RoleType       string `gorm:"column:role_type"`
+		Position       string `gorm:"column:position"`
+		DepartmentName string `gorm:"column:department_name"`
+	}
+	var info adminInfo
+	adminSQL := `
+		SELECT 
+			a.name, 
+			a.last_name, 
+			COALESCE(ar.type, '') as role_type,
+			COALESCE(a.position, '') as position,
+			COALESCE(d.name, '-') as department_name
+		FROM admin_users a
+		LEFT JOIN admin_roles ar ON ar.id = a.role_id
+		LEFT JOIN admin_departments ad ON ad.admin_id = a.id
+		LEFT JOIN departments d ON d.id = ad.department_id
+		WHERE a.id::text = ?
+		LIMIT 1
+	`
+	_ = r.db.Raw(adminSQL, userID).Scan(&info).Error
+
+	type verifyStats struct {
+		VerifiedCount  int64   `gorm:"column:verified_count"`
+		RejectedCount  int64   `gorm:"column:rejected_count"`
+		TotalAudited   int64   `gorm:"column:total_audited"`
+		AvgDurationSec float64 `gorm:"column:avg_duration_sec"`
+	}
+	var vs verifyStats
+	statQuery := r.db.Table("user_informations").
+		Select(`
+			COUNT(CASE WHEN verification_status = 'verified' THEN 1 END) as verified_count,
+			COUNT(CASE WHEN verification_status = 'rejected' THEN 1 END) as rejected_count,
+			COUNT(CASE WHEN verification_status IN ('verified', 'rejected') THEN 1 END) as total_audited,
+			COALESCE(AVG(CASE 
+				WHEN verification_status IN ('verified', 'rejected') 
+				     AND COALESCE(verified_date, updated_date) > created_date 
+				THEN EXTRACT(EPOCH FROM (COALESCE(verified_date, updated_date) - created_date)) 
+			END), 0) as avg_duration_sec
+		`).
+		Where("updated_by = ?", userID)
+
+	if filter.StartDate != nil {
+		statQuery = statQuery.Where("created_date >= ?", filter.StartDate)
+	}
+	if filter.EndDate != nil {
+		statQuery = statQuery.Where("created_date <= ?", filter.EndDate)
+	}
+	_ = statQuery.Scan(&vs).Error
+
+	var approvalPct float64
+	if vs.TotalAudited > 0 {
+		approvalPct = math.Round((float64(vs.VerifiedCount)/float64(vs.TotalAudited))*1000) / 10
+	}
+	avgProcessingMin := math.Round((vs.AvgDurationSec/60.0)*10) / 10
+
+	type caseRow struct {
+		UserID          string    `gorm:"column:user_id"`
+		Prefix          string    `gorm:"column:prefix"`
+		Name            string    `gorm:"column:name"`
+		LastName        string    `gorm:"column:last_name"`
+		Status          string    `gorm:"column:verification_status"`
+		District        string    `gorm:"column:district"`
+		Subdistrict     string    `gorm:"column:subdistrict"`
+		RejectionReason *string   `gorm:"column:rejection_reason"`
+		CreatedDate     time.Time `gorm:"column:created_date"`
+		VerifiedDate    time.Time `gorm:"column:verified_date"`
+	}
+	var rows []caseRow
+	caseQuery := r.db.Table("user_informations").
+		Select(`
+			user_id::text as user_id,
+			COALESCE(prefix, '') as prefix,
+			COALESCE(name, '') as name,
+			COALESCE(last_name, '') as last_name,
+			verification_status,
+			COALESCE(district, '') as district,
+			COALESCE(subdistrict, '') as subdistrict,
+			rejection_reason,
+			created_date,
+			COALESCE(verified_date, updated_date) as verified_date
+		`).
+		Where("updated_by = ?", userID)
+
+	if filter.StartDate != nil {
+		caseQuery = caseQuery.Where("created_date >= ?", filter.StartDate)
+	}
+	if filter.EndDate != nil {
+		caseQuery = caseQuery.Where("created_date <= ?", filter.EndDate)
+	}
+	_ = caseQuery.Order("COALESCE(verified_date, updated_date) DESC").Limit(20).Scan(&rows).Error
+
+	recentCases := make([]domain.KPIVerifyRecentCaseItem, len(rows))
+	for i, rItem := range rows {
+		durationSec := int64(rItem.VerifiedDate.Sub(rItem.CreatedDate).Seconds())
+		durationMin := durationSec / 60
+		if durationMin < 1 && durationSec > 0 {
+			durationMin = 1
+		}
+		var reason string
+		if rItem.RejectionReason != nil {
+			reason = *rItem.RejectionReason
+		}
+		fullName := strings.TrimSpace(fmt.Sprintf("%s%s %s", rItem.Prefix, rItem.Name, rItem.LastName))
+		if fullName == "" {
+			fullName = "ประชาชนผู้ลงทะเบียน"
+		}
+		recentCases[i] = domain.KPIVerifyRecentCaseItem{
+			UserID:          rItem.UserID,
+			CitizenName:     fullName,
+			Status:          rItem.Status,
+			District:        rItem.District,
+			Subdistrict:     rItem.Subdistrict,
+			RejectionReason: reason,
+			CreatedDate:     rItem.CreatedDate,
+			VerifiedDate:    rItem.VerifiedDate,
+			DurationMin:     durationMin,
+		}
+	}
+
+	return &domain.KPIStaffDetailResponse{
+		UserID:             userID,
+		Name:               info.Name,
+		LastName:           info.LastName,
+		DepartmentName:     info.DepartmentName,
+		RoleType:           info.RoleType,
+		Position:           info.Position,
+		VerifiedCount:      vs.VerifiedCount,
+		RejectedCount:      vs.RejectedCount,
+		TotalAuditedCount:  vs.TotalAudited,
+		ApprovalPercentage: approvalPct,
+		AvgProcessingMin:   avgProcessingMin,
+		RecentVerifyCases:  recentCases,
+		RecentCases:        []domain.KPIPersonalCaseItem{},
+	}, nil
+}
+
 func (r *kpiLogRepository) GetStaffDetail(userID string, filter domain.KPIQueryFilter) (*domain.KPIStaffDetailResponse, error) {
+	if filter.ModuleKey == domain.ModuleKeyPublicRelations {
+		return r.getPRStaffDetail(userID, filter)
+	}
+	if filter.ModuleKey == domain.ModuleKeyCCTV {
+		return r.getCCTVStaffDetail(userID, filter)
+	}
+	if filter.ModuleKey == domain.ModuleKeyUserVerify {
+		return r.getVerifyStaffDetail(userID, filter)
+	}
+
 	type adminInfo struct {
 		Name           string `gorm:"column:name"`
 		LastName       string `gorm:"column:last_name"`
@@ -1036,7 +1841,7 @@ func (r *kpiLogRepository) UpdateThresholds(moduleKey string, req domain.UpdateK
 }
 
 func (r *kpiLogRepository) GetBreachedCases(filter domain.KPIQueryFilter) ([]domain.KPIBreachedCaseItem, error) {
-	if filter.ModuleKey == domain.ModuleKeyPublicRelations {
+	if filter.ModuleKey == domain.ModuleKeyPublicRelations || filter.ModuleKey == domain.ModuleKeyCCTV || filter.ModuleKey == domain.ModuleKeyUserVerify {
 		return []domain.KPIBreachedCaseItem{}, nil
 	}
 
@@ -1229,6 +2034,106 @@ func (r *kpiLogRepository) GetCategoryStats(filter domain.KPIQueryFilter) ([]dom
 
 		if items == nil {
 			items = []domain.KPICategoryStatItem{}
+		}
+
+		return items, nil
+	}
+
+	if filter.ModuleKey == domain.ModuleKeyCCTV {
+		type cctvCategoryRow struct {
+			CategoryName  string `gorm:"column:category_name"`
+			TotalCount    int64  `gorm:"column:total_count"`
+			ResolvedCount int64  `gorm:"column:resolved_count"`
+			PendingCount  int64  `gorm:"column:pending_count"`
+		}
+		var rows []cctvCategoryRow
+		q := r.db.Table("module_cctv").
+			Select(`
+				CASE 
+					WHEN access_level = 'PUBLIC' THEN 'กล้องเพื่อประชาชน (Public)'
+					ELSE 'กล้องความมั่นคง (Staff Only)'
+				END as category_name,
+				COUNT(*) as total_count,
+				COUNT(CASE WHEN status = 'ONLINE' THEN 1 END) as resolved_count,
+				COUNT(CASE WHEN status = 'OFFLINE' THEN 1 END) as pending_count
+			`).
+			Where("deleted_at IS NULL")
+
+		if filter.UserID != "" {
+			q = q.Where("created_by = ?", filter.UserID)
+		}
+
+		_ = q.Group("access_level").Order("total_count DESC").Scan(&rows).Error
+
+		totalAll := int64(0)
+		for _, rItem := range rows {
+			totalAll += rItem.TotalCount
+		}
+
+		items := make([]domain.KPICategoryStatItem, len(rows))
+		for i, rItem := range rows {
+			var pct float64
+			if totalAll > 0 {
+				pct = math.Round((float64(rItem.TotalCount)/float64(totalAll))*1000) / 10
+			}
+			items[i] = domain.KPICategoryStatItem{
+				CategoryName:  rItem.CategoryName,
+				TotalCount:    rItem.TotalCount,
+				ResolvedCount: rItem.ResolvedCount,
+				PendingCount:  rItem.PendingCount,
+				Percentage:    pct,
+			}
+		}
+
+		return items, nil
+	}
+
+	if filter.ModuleKey == domain.ModuleKeyUserVerify {
+		type districtCategoryRow struct {
+			DistrictName  string `gorm:"column:district_name"`
+			TotalCount    int64  `gorm:"column:total_count"`
+			VerifiedCount int64  `gorm:"column:verified_count"`
+			PendingCount  int64  `gorm:"column:pending_count"`
+		}
+		var rows []districtCategoryRow
+		q := r.db.Table("user_informations").
+			Select(`
+				COALESCE(NULLIF(TRIM(district), ''), 'ไม่ระบุอำเภอ') as district_name,
+				COUNT(*) as total_count,
+				COUNT(CASE WHEN verification_status = 'verified' THEN 1 END) as verified_count,
+				COUNT(CASE WHEN verification_status = 'pending' THEN 1 END) as pending_count
+			`)
+
+		if filter.UserID != "" {
+			q = q.Where("updated_by = ?", filter.UserID)
+		}
+		if filter.StartDate != nil {
+			q = q.Where("created_date >= ?", filter.StartDate)
+		}
+		if filter.EndDate != nil {
+			q = q.Where("created_date <= ?", filter.EndDate)
+		}
+
+		_ = q.Group("COALESCE(NULLIF(TRIM(district), ''), 'ไม่ระบุอำเภอ')").Order("total_count DESC").Scan(&rows).Error
+
+		totalAll := int64(0)
+		for _, rItem := range rows {
+			totalAll += rItem.TotalCount
+		}
+
+		items := make([]domain.KPICategoryStatItem, len(rows))
+		for i, rItem := range rows {
+			var pct float64
+			if totalAll > 0 {
+				pct = math.Round((float64(rItem.TotalCount)/float64(totalAll))*1000) / 10
+			}
+			items[i] = domain.KPICategoryStatItem{
+				CategoryName:  rItem.DistrictName,
+				TotalCount:    rItem.TotalCount,
+				ResolvedCount: rItem.VerifiedCount,
+				PendingCount:  rItem.PendingCount,
+				Percentage:    pct,
+			}
 		}
 
 		return items, nil
