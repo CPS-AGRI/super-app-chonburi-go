@@ -8,6 +8,7 @@ RUN apk add --no-cache git ca-certificates
 
 # Copy dependency files
 COPY go.mod go.sum ./
+ENV GOPROXY=https://proxy.golang.org,https://goproxy.io,direct
 RUN go mod download
 
 # Copy source code

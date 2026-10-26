@@ -76,7 +76,7 @@ func main() {
 			}
 			return false
 		},
-		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization", "X-Requested-With"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization", "X-Requested-With", "X-M2M-Key", "X-Timestamp", "X-Nonce", "X-Signature"},
 		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowCredentials: true,
 	}))
@@ -146,6 +146,16 @@ func main() {
 	cctvHandler := delivery.NewCCTVHandler(cctvUC)
 	weatherAccountHandler := delivery.NewWeatherAccountHandler(weatherAccountUC)
 
+	// Water Level Module (Consolidated from IoT Core Gateway / River Microservice)
+	waterLevelRepo := repository.NewWaterLevelRepository(cfg, redis.Client)
+	waterLevelUC := usecase.NewWaterLevelUseCase(waterLevelRepo)
+	waterLevelHandler := delivery.NewWaterLevelHandler(waterLevelUC)
+
+	// Weather & Sense Module (Consolidated from Fahfon Weather Upstream & Pattaya 165 Registry)
+	weatherRepo := repository.NewWeatherRepository(database.DB, cfg, redis.Client)
+	weatherUC := usecase.NewWeatherUseCase(weatherRepo)
+	weatherHandler := delivery.NewWeatherHandler(weatherUC)
+
 	fcmWorkerPool := usecase.InitGlobalFCMWorkerPool(5000, 30)
 	notificationHandler := delivery.NewNotificationHandler(database.DB, fcmWorkerPool)
 
@@ -173,6 +183,11 @@ func main() {
 	cctvHandler.RegisterRoutes(api)
 	notificationHandler.RegisterRoutes(api)
 	weatherAccountHandler.RegisterRoutes(api)
+
+	// Register Weather & Water Level Telemetry endpoints protected by M2M HMAC-SHA256 & JWT Bearer
+	protected := api.Group("", middleware.M2MOrJWT(cfg))
+	weatherHandler.RegisterRoutes(protected)
+	waterLevelHandler.RegisterRoutes(protected)
 
 	port := ":" + cfg.AppPort
 	log.Printf("🚀 Server is starting on http://localhost%s", port)
