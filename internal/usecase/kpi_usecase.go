@@ -47,3 +47,11 @@ func (u *kpiUseCase) GetThresholds(moduleKey string) (*domain.KPIThresholdConfig
 func (u *kpiUseCase) UpdateThresholds(moduleKey string, req domain.UpdateKPIThresholdRequest, adminID string) (*domain.KPIThresholdConfig, error) {
 	return u.repo.UpdateThresholds(moduleKey, req, adminID)
 }
+
+func (u *kpiUseCase) GetDataSharingLogs(module string, limit int) ([]domain.DataSharingLog, error) {
+	return u.repo.GetDataSharingLogs(module, limit)
+}
+
+func (u *kpiUseCase) GetDataSharingSummary(module string) (*domain.DataSharingSummaryResponse, error) {
+	return u.repo.GetDataSharingSummary(module)
+}

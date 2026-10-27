@@ -384,15 +384,15 @@ type KPILogRepository interface {
 	GetCategoryStats(filter KPIQueryFilter) ([]KPICategoryStatItem, error)
 	GetThresholds(moduleKey string) (*KPIThresholdConfig, error)
 	UpdateThresholds(moduleKey string, req UpdateKPIThresholdRequest, adminID string) (*KPIThresholdConfig, error)
+	GetDataSharingLogs(module string, limit int) ([]DataSharingLog, error)
+	GetDataSharingSummary(module string) (*DataSharingSummaryResponse, error)
 }
 
-// KPILogger represents an async logging engine
 type KPILogger interface {
 	LogEvent(log *KPILog)
 	Close()
 }
 
-// KPIUseCase interface
 type KPIUseCase interface {
 	GetSummary(filter KPIQueryFilter) (*KPISummaryResponse, error)
 	GetStaffLeaderboard(filter KPIQueryFilter) ([]KPIStaffLeaderboardItem, error)
@@ -403,4 +403,39 @@ type KPIUseCase interface {
 	GetCategoryStats(filter KPIQueryFilter) ([]KPICategoryStatItem, error)
 	GetThresholds(moduleKey string) (*KPIThresholdConfig, error)
 	UpdateThresholds(moduleKey string, req UpdateKPIThresholdRequest, adminID string) (*KPIThresholdConfig, error)
+	GetDataSharingLogs(module string, limit int) ([]DataSharingLog, error)
+	GetDataSharingSummary(module string) (*DataSharingSummaryResponse, error)
+}
+
+type DataSharingLog struct {
+	ID            int64     `gorm:"primaryKey;column:id" json:"id"`
+	Category      string    `gorm:"column:category" json:"category"`
+	CategoryLabel string    `gorm:"column:category_label" json:"category_label"`
+	DataPoints    int       `gorm:"column:data_points" json:"data_points"`
+	DurationMs    int       `gorm:"column:duration_ms" json:"duration_ms"`
+	Recipient     string    `gorm:"column:recipient" json:"recipient"`
+	Status        string    `gorm:"column:status" json:"status"`
+	ClientIP      string    `gorm:"column:client_ip" json:"client_ip"`
+	CreatedAt     time.Time `gorm:"column:created_at" json:"created_at"`
+}
+
+type DataSharingCategoryStat struct {
+	Category        string  `json:"category"`
+	CategoryLabel   string  `json:"category_label"`
+	TotalRecords    int64   `json:"total_records"`
+	TotalDataPoints int64   `json:"total_data_points"`
+	AvgDurationMs   float64 `json:"avg_duration_ms"`
+}
+
+type DataSharingSummaryResponse struct {
+	TotalQueries        int64                     `json:"total_queries"`
+	TotalDataPoints     int64                     `json:"total_data_points"`
+	AvgLatencyMs        float64                   `json:"avg_latency_ms"`
+	TodayQueries        int64                     `json:"today_queries"`
+	SystemUptimePercent float64                   `json:"system_uptime_percent"`
+	ActiveStreams       int                       `json:"active_streams"`
+	SharedRiverNodes    int                       `json:"shared_river_nodes"`
+	SharedWeatherNodes  int                       `json:"shared_weather_nodes"`
+	CategoryBreakdown   []DataSharingCategoryStat `json:"category_breakdown"`
+	RecentLogs          []DataSharingLog          `json:"recent_logs"`
 }
