@@ -39,6 +39,11 @@ func (r *kpiLogRepository) GetKPISummary(filter domain.KPIQueryFilter) (*domain.
 		if filter.UserID != "" {
 			pubQuery = pubQuery.Where("admin_user_id::text = ?", filter.UserID)
 		}
+		if filter.DepartmentID != "" {
+			pubQuery = pubQuery.Where("admin_user_id IN (SELECT admin_id FROM admin_departments WHERE department_id::text = ?)", filter.DepartmentID)
+		} else if len(filter.DepartmentIDs) > 0 {
+			pubQuery = pubQuery.Where("admin_user_id IN (SELECT admin_id FROM admin_departments WHERE department_id::text IN (?))", filter.DepartmentIDs)
+		}
 		if filter.StartDate != nil {
 			pubQuery = pubQuery.Where("created_date >= ?", filter.StartDate)
 		}
@@ -57,6 +62,11 @@ func (r *kpiLogRepository) GetKPISummary(filter domain.KPIQueryFilter) (*domain.
 		if filter.UserID != "" {
 			viewQuery = viewQuery.Where("pr.admin_user_id::text = ?", filter.UserID)
 		}
+		if filter.DepartmentID != "" {
+			viewQuery = viewQuery.Where("pr.admin_user_id IN (SELECT admin_id FROM admin_departments WHERE department_id::text = ?)", filter.DepartmentID)
+		} else if len(filter.DepartmentIDs) > 0 {
+			viewQuery = viewQuery.Where("pr.admin_user_id IN (SELECT admin_id FROM admin_departments WHERE department_id::text IN (?))", filter.DepartmentIDs)
+		}
 		if filter.StartDate != nil {
 			viewQuery = viewQuery.Where("pr.created_date >= ?", filter.StartDate)
 		}
@@ -70,6 +80,11 @@ func (r *kpiLogRepository) GetKPISummary(filter domain.KPIQueryFilter) (*domain.
 			Joins("JOIN module_public_relations pr ON pr.id = l.module_public_relation_id")
 		if filter.UserID != "" {
 			likeQuery = likeQuery.Where("pr.admin_user_id::text = ?", filter.UserID)
+		}
+		if filter.DepartmentID != "" {
+			likeQuery = likeQuery.Where("pr.admin_user_id IN (SELECT admin_id FROM admin_departments WHERE department_id::text = ?)", filter.DepartmentID)
+		} else if len(filter.DepartmentIDs) > 0 {
+			likeQuery = likeQuery.Where("pr.admin_user_id IN (SELECT admin_id FROM admin_departments WHERE department_id::text IN (?))", filter.DepartmentIDs)
 		}
 		if filter.StartDate != nil {
 			likeQuery = likeQuery.Where("pr.created_date >= ?", filter.StartDate)
@@ -86,6 +101,11 @@ func (r *kpiLogRepository) GetKPISummary(filter domain.KPIQueryFilter) (*domain.
 		if filter.UserID != "" {
 			commentQuery = commentQuery.Where("pr.admin_user_id::text = ?", filter.UserID)
 		}
+		if filter.DepartmentID != "" {
+			commentQuery = commentQuery.Where("pr.admin_user_id IN (SELECT admin_id FROM admin_departments WHERE department_id::text = ?)", filter.DepartmentID)
+		} else if len(filter.DepartmentIDs) > 0 {
+			commentQuery = commentQuery.Where("pr.admin_user_id IN (SELECT admin_id FROM admin_departments WHERE department_id::text IN (?))", filter.DepartmentIDs)
+		}
 		if filter.StartDate != nil {
 			commentQuery = commentQuery.Where("pr.created_date >= ?", filter.StartDate)
 		}
@@ -99,6 +119,11 @@ func (r *kpiLogRepository) GetKPISummary(filter domain.KPIQueryFilter) (*domain.
 			Where("LOWER(n.status) IN ('published', 'active', 'sent')")
 		if filter.UserID != "" {
 			broadcastQuery = broadcastQuery.Where("n.admin_user_id::text = ?", filter.UserID)
+		}
+		if filter.DepartmentID != "" {
+			broadcastQuery = broadcastQuery.Where("n.admin_user_id IN (SELECT admin_id FROM admin_departments WHERE department_id::text = ?)", filter.DepartmentID)
+		} else if len(filter.DepartmentIDs) > 0 {
+			broadcastQuery = broadcastQuery.Where("n.admin_user_id IN (SELECT admin_id FROM admin_departments WHERE department_id::text IN (?))", filter.DepartmentIDs)
 		}
 		if filter.StartDate != nil {
 			broadcastQuery = broadcastQuery.Where("n.created_date >= ?", filter.StartDate)
@@ -122,6 +147,11 @@ func (r *kpiLogRepository) GetKPISummary(filter domain.KPIQueryFilter) (*domain.
 		eventQuery := r.db.Table("kpi_activity_logs").Where("module_key = ?", domain.ModuleKeyPublicRelations)
 		if filter.UserID != "" {
 			eventQuery = eventQuery.Where("actor_id::text = ?", filter.UserID)
+		}
+		if filter.DepartmentID != "" {
+			eventQuery = eventQuery.Where("department_id::text = ?", filter.DepartmentID)
+		} else if len(filter.DepartmentIDs) > 0 {
+			eventQuery = eventQuery.Where("department_id::text IN (?)", filter.DepartmentIDs)
 		}
 		if filter.StartDate != nil {
 			eventQuery = eventQuery.Where("created_date >= ?", filter.StartDate)
@@ -303,6 +333,11 @@ func (r *kpiLogRepository) GetKPISummary(filter domain.KPIQueryFilter) (*domain.
 
 		if filter.UserID != "" {
 			q = q.Where("updated_by = ?", filter.UserID)
+		}
+		if filter.DepartmentID != "" {
+			q = q.Where("updated_by IN (SELECT admin_id::text FROM admin_departments WHERE department_id::text = ?)", filter.DepartmentID)
+		} else if len(filter.DepartmentIDs) > 0 {
+			q = q.Where("updated_by IN (SELECT admin_id::text FROM admin_departments WHERE department_id::text IN (?))", filter.DepartmentIDs)
 		}
 		if filter.StartDate != nil {
 			q = q.Where("created_date >= ?", filter.StartDate)
@@ -1990,6 +2025,13 @@ func (r *kpiLogRepository) GetCategoryStats(filter domain.KPIQueryFilter) ([]dom
 			whereClauses = append(whereClauses, "pr.admin_user_id::text = ?")
 			args = append(args, filter.UserID)
 		}
+		if filter.DepartmentID != "" {
+			whereClauses = append(whereClauses, "pr.admin_user_id IN (SELECT admin_id FROM admin_departments WHERE department_id::text = ?)")
+			args = append(args, filter.DepartmentID)
+		} else if len(filter.DepartmentIDs) > 0 {
+			whereClauses = append(whereClauses, "pr.admin_user_id IN (SELECT admin_id FROM admin_departments WHERE department_id::text IN (?))")
+			args = append(args, filter.DepartmentIDs)
+		}
 		if filter.StartDate != nil {
 			whereClauses = append(whereClauses, "pr.created_date >= ?")
 			args = append(args, filter.StartDate)
@@ -2107,6 +2149,11 @@ func (r *kpiLogRepository) GetCategoryStats(filter domain.KPIQueryFilter) ([]dom
 		if filter.UserID != "" {
 			q = q.Where("updated_by = ?", filter.UserID)
 		}
+		if filter.DepartmentID != "" {
+			q = q.Where("updated_by IN (SELECT admin_id::text FROM admin_departments WHERE department_id::text = ?)", filter.DepartmentID)
+		} else if len(filter.DepartmentIDs) > 0 {
+			q = q.Where("updated_by IN (SELECT admin_id::text FROM admin_departments WHERE department_id::text IN (?))", filter.DepartmentIDs)
+		}
 		if filter.StartDate != nil {
 			q = q.Where("created_date >= ?", filter.StartDate)
 		}
@@ -2205,5 +2252,137 @@ func (r *kpiLogRepository) GetCategoryStats(filter domain.KPIQueryFilter) ([]dom
 	}
 
 	return items, nil
+}
+
+func (r *kpiLogRepository) GetDataSharingLogs(module string, startDate, endDate string, limit int) ([]domain.DataSharingLog, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	var logs []domain.DataSharingLog
+	query := r.db.Table("dashboard_data_sharing_logs")
+	if module == domain.ModuleKeyFlood {
+		query = query.Where("category IN (?)", []string{"river_sensors", "cctv_streams"})
+	} else if module == domain.ModuleKeyWeather {
+		query = query.Where("category IN (?)", []string{"weather_sensors", "radar_tiles"})
+	}
+	if startDate != "" {
+		query = query.Where("created_at >= ?", startDate+" 00:00:00")
+	}
+	if endDate != "" {
+		query = query.Where("created_at <= ?", endDate+" 23:59:59")
+	}
+	err := query.
+		Order("created_at DESC").
+		Limit(limit).
+		Find(&logs).Error
+	if err != nil {
+		return []domain.DataSharingLog{}, err
+	}
+	if logs == nil {
+		logs = []domain.DataSharingLog{}
+	}
+	return logs, nil
+}
+
+func (r *kpiLogRepository) GetDataSharingSummary(module string, startDate, endDate string) (*domain.DataSharingSummaryResponse, error) {
+	type overallStats struct {
+		TotalQueries    int64   `gorm:"column:total_queries"`
+		TotalDataPoints int64   `gorm:"column:total_data_points"`
+		AvgLatency      float64 `gorm:"column:avg_latency"`
+		TodayQueries    int64   `gorm:"column:today_queries"`
+		SuccessQueries  int64   `gorm:"column:success_queries"`
+	}
+	var stats overallStats
+	baseQuery := r.db.Table("dashboard_data_sharing_logs")
+	if module == domain.ModuleKeyFlood {
+		baseQuery = baseQuery.Where("category IN (?)", []string{"river_sensors", "cctv_streams"})
+	} else if module == domain.ModuleKeyWeather {
+		baseQuery = baseQuery.Where("category IN (?)", []string{"weather_sensors", "radar_tiles"})
+	}
+	if startDate != "" {
+		baseQuery = baseQuery.Where("created_at >= ?", startDate+" 00:00:00")
+	}
+	if endDate != "" {
+		baseQuery = baseQuery.Where("created_at <= ?", endDate+" 23:59:59")
+	}
+	_ = baseQuery.
+		Select(`
+			COUNT(*)::int AS total_queries,
+			COALESCE(SUM(data_points), 0)::bigint AS total_data_points,
+			COALESCE(AVG(duration_ms), 0)::numeric(10, 1) AS avg_latency,
+			COUNT(CASE WHEN created_at >= CURRENT_DATE THEN 1 END)::int AS today_queries,
+			COUNT(CASE WHEN status != 'failed' THEN 1 END)::int AS success_queries
+		`).
+		Scan(&stats).Error
+
+	type catRow struct {
+		Category        string  `gorm:"column:category"`
+		CategoryLabel   string  `gorm:"column:category_label"`
+		TotalRecords    int64   `gorm:"column:total_records"`
+		TotalDataPoints int64   `gorm:"column:total_data_points"`
+		AvgDuration     float64 `gorm:"column:avg_duration"`
+	}
+	var catRows []catRow
+	catQuery := r.db.Table("dashboard_data_sharing_logs")
+	if module == domain.ModuleKeyFlood {
+		catQuery = catQuery.Where("category IN (?)", []string{"river_sensors", "cctv_streams"})
+	} else if module == domain.ModuleKeyWeather {
+		catQuery = catQuery.Where("category IN (?)", []string{"weather_sensors", "radar_tiles"})
+	}
+	if startDate != "" {
+		catQuery = catQuery.Where("created_at >= ?", startDate+" 00:00:00")
+	}
+	if endDate != "" {
+		catQuery = catQuery.Where("created_at <= ?", endDate+" 23:59:59")
+	}
+	_ = catQuery.
+		Select(`
+			category,
+			category_label,
+			COUNT(*) as total_records,
+			COALESCE(SUM(data_points), 0) as total_data_points,
+			COALESCE(AVG(duration_ms), 0) as avg_duration
+		`).
+		Group("category, category_label").
+		Scan(&catRows).Error
+
+	breakdown := make([]domain.DataSharingCategoryStat, len(catRows))
+	for i, c := range catRows {
+		breakdown[i] = domain.DataSharingCategoryStat{
+			Category:        c.Category,
+			CategoryLabel:   c.CategoryLabel,
+			TotalRecords:    c.TotalRecords,
+			TotalDataPoints: c.TotalDataPoints,
+			AvgDurationMs:   math.Round(c.AvgDuration*10) / 10,
+		}
+	}
+
+	recentLogs, _ := r.GetDataSharingLogs(module, startDate, endDate, 20)
+
+	sharedRiverNodes := 61
+	sharedWeatherNodes := 165
+	if module == domain.ModuleKeyFlood {
+		sharedWeatherNodes = 0
+	} else if module == domain.ModuleKeyWeather {
+		sharedRiverNodes = 0
+	}
+
+	uptimePercent := 100.0
+	if stats.TotalQueries > 0 {
+		uptimePercent = math.Round((float64(stats.SuccessQueries)/float64(stats.TotalQueries))*10000) / 100
+	}
+
+	return &domain.DataSharingSummaryResponse{
+		TotalQueries:        stats.TotalQueries,
+		TotalDataPoints:     stats.TotalDataPoints,
+		AvgLatencyMs:        math.Round(stats.AvgLatency*10) / 10,
+		TodayQueries:        stats.TodayQueries,
+		SystemUptimePercent: uptimePercent,
+		ActiveStreams:       61,
+		SharedRiverNodes:    sharedRiverNodes,
+		SharedWeatherNodes:  sharedWeatherNodes,
+		CategoryBreakdown:   breakdown,
+		RecentLogs:          recentLogs,
+	}, nil
 }
 

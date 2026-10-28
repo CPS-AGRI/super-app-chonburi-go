@@ -1,6 +1,7 @@
 package http
 
 import (
+	"strconv"
 	"strings"
 	"super-app-chonburi-go/internal/domain"
 	"super-app-chonburi-go/pkg/jwtutil"
@@ -18,9 +19,10 @@ func NewKPIHandler(uc domain.KPIUseCase) *KPIHandler {
 }
 
 func (h *KPIHandler) RegisterRoutes(router fiber.Router) {
-	kpiGroup := router.Group("/kpi")
-	protected := kpiGroup.Group("", jwtutil.RequireAuth())
+	router.Get("/kpi/data-sharing-logs", h.GetDataSharingLogs)
+	router.Get("/kpi/data-sharing-summary", h.GetDataSharingSummary)
 
+	protected := router.Group("/kpi", jwtutil.RequireAuth())
 	protected.Get("/summary", h.GetSummary)
 	protected.Get("/staff-leaderboard", h.GetStaffLeaderboard)
 	protected.Get("/manager-scorecard", h.GetManagerScorecard)
@@ -192,5 +194,36 @@ func (h *KPIHandler) UpdateThresholds(c fiber.Ctx) error {
 	}
 
 	return SuccessResponse(c, updated)
+}
+
+func (h *KPIHandler) GetDataSharingLogs(c fiber.Ctx) error {
+	module := c.Query("module")
+	startDate := c.Query("start_date")
+	endDate := c.Query("end_date")
+	limitStr := c.Query("limit", "50")
+	limit, _ := strconv.Atoi(limitStr)
+	logs, err := h.uc.GetDataSharingLogs(module, startDate, endDate, limit)
+	if err != nil {
+		return ErrorResponse(c, "Failed to fetch data sharing logs: "+err.Error())
+	}
+	return c.JSON(fiber.Map{
+		"success": true,
+		"items":   logs,
+		"total":   len(logs),
+	})
+}
+
+func (h *KPIHandler) GetDataSharingSummary(c fiber.Ctx) error {
+	module := c.Query("module")
+	startDate := c.Query("start_date")
+	endDate := c.Query("end_date")
+	summary, err := h.uc.GetDataSharingSummary(module, startDate, endDate)
+	if err != nil {
+		return ErrorResponse(c, "Failed to fetch data sharing summary: "+err.Error())
+	}
+	return c.JSON(fiber.Map{
+		"success": true,
+		"data":    summary,
+	})
 }
 
