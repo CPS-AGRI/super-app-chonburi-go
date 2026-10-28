@@ -48,10 +48,10 @@ func (u *kpiUseCase) UpdateThresholds(moduleKey string, req domain.UpdateKPIThre
 	return u.repo.UpdateThresholds(moduleKey, req, adminID)
 }
 
-func (u *kpiUseCase) GetDataSharingLogs(module string, limit int) ([]domain.DataSharingLog, error) {
-	return u.repo.GetDataSharingLogs(module, limit)
+func (u *kpiUseCase) GetDataSharingLogs(module string, startDate, endDate string, limit int) ([]domain.DataSharingLog, error) {
+	return u.repo.GetDataSharingLogs(module, startDate, endDate, limit)
 }
 
-func (u *kpiUseCase) GetDataSharingSummary(module string) (*domain.DataSharingSummaryResponse, error) {
-	return u.repo.GetDataSharingSummary(module)
+func (u *kpiUseCase) GetDataSharingSummary(module string, startDate, endDate string) (*domain.DataSharingSummaryResponse, error) {
+	return u.repo.GetDataSharingSummary(module, startDate, endDate)
 }

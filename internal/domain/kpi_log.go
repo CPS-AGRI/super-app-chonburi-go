@@ -384,8 +384,8 @@ type KPILogRepository interface {
 	GetCategoryStats(filter KPIQueryFilter) ([]KPICategoryStatItem, error)
 	GetThresholds(moduleKey string) (*KPIThresholdConfig, error)
 	UpdateThresholds(moduleKey string, req UpdateKPIThresholdRequest, adminID string) (*KPIThresholdConfig, error)
-	GetDataSharingLogs(module string, limit int) ([]DataSharingLog, error)
-	GetDataSharingSummary(module string) (*DataSharingSummaryResponse, error)
+	GetDataSharingLogs(module string, startDate, endDate string, limit int) ([]DataSharingLog, error)
+	GetDataSharingSummary(module string, startDate, endDate string) (*DataSharingSummaryResponse, error)
 }
 
 type KPILogger interface {
@@ -403,8 +403,8 @@ type KPIUseCase interface {
 	GetCategoryStats(filter KPIQueryFilter) ([]KPICategoryStatItem, error)
 	GetThresholds(moduleKey string) (*KPIThresholdConfig, error)
 	UpdateThresholds(moduleKey string, req UpdateKPIThresholdRequest, adminID string) (*KPIThresholdConfig, error)
-	GetDataSharingLogs(module string, limit int) ([]DataSharingLog, error)
-	GetDataSharingSummary(module string) (*DataSharingSummaryResponse, error)
+	GetDataSharingLogs(module string, startDate, endDate string, limit int) ([]DataSharingLog, error)
+	GetDataSharingSummary(module string, startDate, endDate string) (*DataSharingSummaryResponse, error)
 }
 
 type DataSharingLog struct {

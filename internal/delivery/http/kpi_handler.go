@@ -198,9 +198,11 @@ func (h *KPIHandler) UpdateThresholds(c fiber.Ctx) error {
 
 func (h *KPIHandler) GetDataSharingLogs(c fiber.Ctx) error {
 	module := c.Query("module")
+	startDate := c.Query("start_date")
+	endDate := c.Query("end_date")
 	limitStr := c.Query("limit", "50")
 	limit, _ := strconv.Atoi(limitStr)
-	logs, err := h.uc.GetDataSharingLogs(module, limit)
+	logs, err := h.uc.GetDataSharingLogs(module, startDate, endDate, limit)
 	if err != nil {
 		return ErrorResponse(c, "Failed to fetch data sharing logs: "+err.Error())
 	}
@@ -213,7 +215,9 @@ func (h *KPIHandler) GetDataSharingLogs(c fiber.Ctx) error {
 
 func (h *KPIHandler) GetDataSharingSummary(c fiber.Ctx) error {
 	module := c.Query("module")
-	summary, err := h.uc.GetDataSharingSummary(module)
+	startDate := c.Query("start_date")
+	endDate := c.Query("end_date")
+	summary, err := h.uc.GetDataSharingSummary(module, startDate, endDate)
 	if err != nil {
 		return ErrorResponse(c, "Failed to fetch data sharing summary: "+err.Error())
 	}

@@ -2254,7 +2254,7 @@ func (r *kpiLogRepository) GetCategoryStats(filter domain.KPIQueryFilter) ([]dom
 	return items, nil
 }
 
-func (r *kpiLogRepository) GetDataSharingLogs(module string, limit int) ([]domain.DataSharingLog, error) {
+func (r *kpiLogRepository) GetDataSharingLogs(module string, startDate, endDate string, limit int) ([]domain.DataSharingLog, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
@@ -2262,6 +2262,14 @@ func (r *kpiLogRepository) GetDataSharingLogs(module string, limit int) ([]domai
 	query := r.db.Table("dashboard_data_sharing_logs")
 	if module == domain.ModuleKeyFlood {
 		query = query.Where("category IN (?)", []string{"river_sensors", "cctv_streams"})
+	} else if module == domain.ModuleKeyWeather {
+		query = query.Where("category IN (?)", []string{"weather_sensors", "radar_tiles"})
+	}
+	if startDate != "" {
+		query = query.Where("created_at >= ?", startDate+" 00:00:00")
+	}
+	if endDate != "" {
+		query = query.Where("created_at <= ?", endDate+" 23:59:59")
 	}
 	err := query.
 		Order("created_at DESC").
@@ -2276,24 +2284,34 @@ func (r *kpiLogRepository) GetDataSharingLogs(module string, limit int) ([]domai
 	return logs, nil
 }
 
-func (r *kpiLogRepository) GetDataSharingSummary(module string) (*domain.DataSharingSummaryResponse, error) {
+func (r *kpiLogRepository) GetDataSharingSummary(module string, startDate, endDate string) (*domain.DataSharingSummaryResponse, error) {
 	type overallStats struct {
 		TotalQueries    int64   `gorm:"column:total_queries"`
 		TotalDataPoints int64   `gorm:"column:total_data_points"`
 		AvgLatency      float64 `gorm:"column:avg_latency"`
 		TodayQueries    int64   `gorm:"column:today_queries"`
+		SuccessQueries  int64   `gorm:"column:success_queries"`
 	}
 	var stats overallStats
 	baseQuery := r.db.Table("dashboard_data_sharing_logs")
 	if module == domain.ModuleKeyFlood {
 		baseQuery = baseQuery.Where("category IN (?)", []string{"river_sensors", "cctv_streams"})
+	} else if module == domain.ModuleKeyWeather {
+		baseQuery = baseQuery.Where("category IN (?)", []string{"weather_sensors", "radar_tiles"})
+	}
+	if startDate != "" {
+		baseQuery = baseQuery.Where("created_at >= ?", startDate+" 00:00:00")
+	}
+	if endDate != "" {
+		baseQuery = baseQuery.Where("created_at <= ?", endDate+" 23:59:59")
 	}
 	_ = baseQuery.
 		Select(`
 			COUNT(*)::int AS total_queries,
 			COALESCE(SUM(data_points), 0)::bigint AS total_data_points,
 			COALESCE(AVG(duration_ms), 0)::numeric(10, 1) AS avg_latency,
-			COUNT(CASE WHEN created_at >= CURRENT_DATE THEN 1 END)::int AS today_queries
+			COUNT(CASE WHEN created_at >= CURRENT_DATE THEN 1 END)::int AS today_queries,
+			COUNT(CASE WHEN status != 'failed' THEN 1 END)::int AS success_queries
 		`).
 		Scan(&stats).Error
 
@@ -2308,6 +2326,14 @@ func (r *kpiLogRepository) GetDataSharingSummary(module string) (*domain.DataSha
 	catQuery := r.db.Table("dashboard_data_sharing_logs")
 	if module == domain.ModuleKeyFlood {
 		catQuery = catQuery.Where("category IN (?)", []string{"river_sensors", "cctv_streams"})
+	} else if module == domain.ModuleKeyWeather {
+		catQuery = catQuery.Where("category IN (?)", []string{"weather_sensors", "radar_tiles"})
+	}
+	if startDate != "" {
+		catQuery = catQuery.Where("created_at >= ?", startDate+" 00:00:00")
+	}
+	if endDate != "" {
+		catQuery = catQuery.Where("created_at <= ?", endDate+" 23:59:59")
 	}
 	_ = catQuery.
 		Select(`
@@ -2331,11 +2357,19 @@ func (r *kpiLogRepository) GetDataSharingSummary(module string) (*domain.DataSha
 		}
 	}
 
-	recentLogs, _ := r.GetDataSharingLogs(module, 20)
+	recentLogs, _ := r.GetDataSharingLogs(module, startDate, endDate, 20)
 
+	sharedRiverNodes := 61
 	sharedWeatherNodes := 165
 	if module == domain.ModuleKeyFlood {
 		sharedWeatherNodes = 0
+	} else if module == domain.ModuleKeyWeather {
+		sharedRiverNodes = 0
+	}
+
+	uptimePercent := 100.0
+	if stats.TotalQueries > 0 {
+		uptimePercent = math.Round((float64(stats.SuccessQueries)/float64(stats.TotalQueries))*10000) / 100
 	}
 
 	return &domain.DataSharingSummaryResponse{
@@ -2343,9 +2377,9 @@ func (r *kpiLogRepository) GetDataSharingSummary(module string) (*domain.DataSha
 		TotalDataPoints:     stats.TotalDataPoints,
 		AvgLatencyMs:        math.Round(stats.AvgLatency*10) / 10,
 		TodayQueries:        stats.TodayQueries,
-		SystemUptimePercent: 99.98,
+		SystemUptimePercent: uptimePercent,
 		ActiveStreams:       61,
-		SharedRiverNodes:    61,
+		SharedRiverNodes:    sharedRiverNodes,
 		SharedWeatherNodes:  sharedWeatherNodes,
 		CategoryBreakdown:   breakdown,
 		RecentLogs:          recentLogs,
