@@ -164,11 +164,7 @@ func (r *cctvRepository) GetRecentLogs(query domain.CCTVLogQuery) (*domain.Pagin
 			camName = item.CCTV.Name
 		}
 
-		mins := item.DurationSeconds / 60
-		if mins < 1 && item.DurationSeconds > 0 {
-			mins = 1
-		}
-		durationText := fmt.Sprintf("%d นาที", mins)
+		durationText := formatDurationText(int64(item.DurationSeconds))
 
 		device := item.DeviceType
 		if device == "" {
@@ -310,7 +306,8 @@ func (r *cctvRepository) GetUserSummaryLogs(query domain.CCTVLogQuery) (*domain.
 			PolicyType:       policy,
 			LastViewedText:   formatThaiDateTime(row.LastViewedAt),
 			TotalMinutes:     totalMins,
-			TotalMinutesText: fmt.Sprintf("%d นาที", totalMins),
+			TotalMinutesText: formatDurationText(row.TotalDurationSeconds),
+			TotalSeconds:     row.TotalDurationSeconds,
 			TimeLimitText:    "ไม่จำกัด",
 			Status:           "ปกติ",
 		}
@@ -327,6 +324,31 @@ func (r *cctvRepository) GetUserSummaryLogs(query domain.CCTVLogQuery) (*domain.
 		PageNumber: query.PageNumber,
 		TotalPages: totalPages,
 	}, nil
+}
+
+func formatDurationText(totalSeconds int64) string {
+	if totalSeconds <= 0 {
+		return "0 วินาที"
+	}
+	if totalSeconds < 60 {
+		return fmt.Sprintf("%d วินาที", totalSeconds)
+	} else if totalSeconds < 3600 {
+		mins := totalSeconds / 60
+		secs := totalSeconds % 60
+		if secs > 0 {
+			return fmt.Sprintf("%d นาที %d วินาที", mins, secs)
+		}
+		return fmt.Sprintf("%d นาที", mins)
+	}
+	hours := totalSeconds / 3600
+	mins := (totalSeconds % 3600) / 60
+	secs := totalSeconds % 60
+	if secs > 0 {
+		return fmt.Sprintf("%d ชม. %d นาที %d วินาที", hours, mins, secs)
+	} else if mins > 0 {
+		return fmt.Sprintf("%d ชม. %d นาที", hours, mins)
+	}
+	return fmt.Sprintf("%d ชม.", hours)
 }
 
 func formatThaiDateTime(t time.Time) string {

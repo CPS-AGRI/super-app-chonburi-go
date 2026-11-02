@@ -64,6 +64,7 @@ type PaginatedVerificationResponse struct {
 
 type ApproveVerificationRequest struct {
 	UserID                    uuid.UUID  `json:"user_id" validate:"required"`
+	IdentityNumber            string     `json:"identity_number"`
 	Prefix                    string     `json:"prefix"`
 	Name                      string     `json:"name"`
 	LastName                  string     `json:"last_name"`

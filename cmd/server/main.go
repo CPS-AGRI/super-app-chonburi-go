@@ -10,6 +10,7 @@ import (
 	"super-app-chonburi-go/internal/delivery/http/middleware"
 	"super-app-chonburi-go/internal/repository"
 	"super-app-chonburi-go/internal/usecase"
+	"super-app-chonburi-go/pkg/crypto"
 	"super-app-chonburi-go/pkg/database"
 	"super-app-chonburi-go/pkg/mail"
 	"super-app-chonburi-go/pkg/redis"
@@ -27,6 +28,12 @@ import (
 
 func main() {
 	cfg := config.LoadConfig()
+
+	if err := crypto.InitPIDCipher(cfg.PIDEncryptionKey, cfg.PIDHmacSecret); err != nil {
+		log.Printf("⚠️ Warning: Initializing PID Cipher with fallback dev key: %v", err)
+	} else {
+		log.Println("🔒 PDPA High-Security AES-256-GCM PID Cipher Initialized Successfully")
+	}
 
 	database.ConnectDB(cfg)
 	redis.ConnectRedis(cfg)

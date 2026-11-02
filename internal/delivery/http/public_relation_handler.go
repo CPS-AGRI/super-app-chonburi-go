@@ -50,6 +50,7 @@ func (h *PublicRelationHandler) RegisterGlobalRoutes(router fiber.Router) {
 	group.Use(jwtutil.RequireAuth())
 	group.Get("/", h.GetWelcomeScreens)
 	group.Put("/", h.UploadWelcomeScreen)
+	group.Delete("/:id", h.DeleteWelcomeScreen)
 }
 
 func (h *PublicRelationHandler) GetDashboardStats(c fiber.Ctx) error {
@@ -443,4 +444,15 @@ func (h *PublicRelationHandler) UploadWelcomeScreen(c fiber.Ctx) error {
 	}
 
 	return c.JSON(fiber.Map{"success": true, "data": screen})
+}
+
+func (h *PublicRelationHandler) DeleteWelcomeScreen(c fiber.Ctx) error {
+	id := c.Params("id")
+	if id == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "id is required"})
+	}
+	if err := h.uc.DeleteWelcomeScreen(id); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(fiber.Map{"success": true})
 }

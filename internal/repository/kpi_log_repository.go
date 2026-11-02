@@ -2,6 +2,7 @@ package repository
 
 import (
 	"fmt"
+	"log"
 	"math"
 	"strings"
 	"time"
@@ -16,7 +17,6 @@ type kpiLogRepository struct {
 }
 
 func NewKPILogRepository(db *gorm.DB) domain.KPILogRepository {
-	_ = db.AutoMigrate(&domain.KPIThresholdConfig{})
 	return &kpiLogRepository{db: db}
 }
 
@@ -223,6 +223,9 @@ func (r *kpiLogRepository) GetKPISummary(filter domain.KPIQueryFilter) (*domain.
 		if filter.UserID != "" {
 			logQuery = logQuery.Where("l.cctv_id IN (SELECT id FROM module_cctv WHERE created_by::text = ?)", filter.UserID)
 		}
+		if filter.CameraID != "" {
+			logQuery = logQuery.Where("l.cctv_id = ?", filter.CameraID)
+		}
 		if filter.StartDate != nil {
 			logQuery = logQuery.Where("l.started_at >= ?", filter.StartDate)
 		}
@@ -249,6 +252,20 @@ func (r *kpiLogRepository) GetKPISummary(filter domain.KPIQueryFilter) (*domain.
 			TotalDurationSec int64  `gorm:"column:total_duration_sec"`
 		}
 		var topRows []topCameraRow
+
+		joinCondition := "LEFT JOIN module_cctv_view_logs l ON l.cctv_id = c.id"
+		var joinArgs []interface{}
+		if filter.StartDate != nil && filter.EndDate != nil {
+			joinCondition += " AND l.started_at >= ? AND l.started_at <= ?"
+			joinArgs = append(joinArgs, filter.StartDate, filter.EndDate)
+		} else if filter.StartDate != nil {
+			joinCondition += " AND l.started_at >= ?"
+			joinArgs = append(joinArgs, filter.StartDate)
+		} else if filter.EndDate != nil {
+			joinCondition += " AND l.started_at <= ?"
+			joinArgs = append(joinArgs, filter.EndDate)
+		}
+
 		topCamQuery := r.db.Table("module_cctv c").
 			Select(`
 				c.id::text as id,
@@ -259,22 +276,19 @@ func (r *kpiLogRepository) GetKPISummary(filter domain.KPIQueryFilter) (*domain.
 				COUNT(l.id) as total_views,
 				COALESCE(SUM(l.duration_seconds), 0) as total_duration_sec
 			`).
-			Joins("LEFT JOIN module_cctv_view_logs l ON l.cctv_id = c.id").
+			Joins(joinCondition, joinArgs...).
 			Where("c.deleted_at IS NULL")
 
 		if filter.UserID != "" {
 			topCamQuery = topCamQuery.Where("c.created_by::text = ?", filter.UserID)
 		}
-		if filter.StartDate != nil {
-			topCamQuery = topCamQuery.Where("l.started_at IS NULL OR l.started_at >= ?", filter.StartDate)
-		}
-		if filter.EndDate != nil {
-			topCamQuery = topCamQuery.Where("l.started_at IS NULL OR l.started_at <= ?", filter.EndDate)
+		if filter.CameraID != "" {
+			topCamQuery = topCamQuery.Where("c.id = ?", filter.CameraID)
 		}
 		_ = topCamQuery.
 			Group("c.id, c.name, c.address, c.status, c.access_level").
 			Order("total_views DESC, total_duration_sec DESC").
-			Limit(5).
+			Limit(200).
 			Scan(&topRows).Error
 
 		topCameras := make([]domain.KPICCTVTopCamera, len(topRows))
@@ -288,6 +302,7 @@ func (r *kpiLogRepository) GetKPISummary(filter domain.KPIQueryFilter) (*domain.
 				AccessLevel:      rItem.AccessLevel,
 				TotalViews:       rItem.TotalViews,
 				TotalDurationMin: mins,
+				TotalDurationSec: rItem.TotalDurationSec,
 			}
 		}
 
@@ -300,6 +315,7 @@ func (r *kpiLogRepository) GetKPISummary(filter domain.KPIQueryFilter) (*domain.
 			CameraUptimeRate:      uptimeRate,
 			TotalViewSessions:     logRaw.TotalSessions,
 			TotalWatchDurationMin: totalWatchMin,
+			TotalWatchDurationSec: logRaw.TotalDurationSec,
 			CitizenViewCount:      logRaw.CitizenSessions,
 			StaffViewCount:        logRaw.StaffSessions,
 			PublicCameraCount:     camRaw.PublicCameraCount,
@@ -1022,7 +1038,9 @@ func (r *kpiLogRepository) getPRStaffDetail(userID string, filter domain.KPIQuer
 		WHERE a.id = ?
 		LIMIT 1
 	`
-	_ = r.db.Raw(adminSQL, userID).Scan(&info).Error
+	if err := r.db.Raw(adminSQL, userID).Scan(&info).Error; err != nil {
+		log.Printf("⚠️ [KPIRepo] Failed to load staff info for user %s: %v", userID, err)
+	}
 
 	var prDateCond string
 	var prArgs []interface{}
@@ -1176,7 +1194,9 @@ func (r *kpiLogRepository) getCCTVStaffDetail(userID string, filter domain.KPIQu
 		WHERE a.id = ?
 		LIMIT 1
 	`
-	_ = r.db.Raw(adminSQL, userID).Scan(&info).Error
+	if err := r.db.Raw(adminSQL, userID).Scan(&info).Error; err != nil {
+		log.Printf("⚠️ [KPIRepo] Failed to load staff info for user %s: %v", userID, err)
+	}
 
 	type camStats struct {
 		TotalCameras  int64 `gorm:"column:total_cameras"`
@@ -1315,7 +1335,9 @@ func (r *kpiLogRepository) getVerifyStaffDetail(userID string, filter domain.KPI
 		WHERE a.id::text = ?
 		LIMIT 1
 	`
-	_ = r.db.Raw(adminSQL, userID).Scan(&info).Error
+	if err := r.db.Raw(adminSQL, userID).Scan(&info).Error; err != nil {
+		log.Printf("⚠️ [KPIRepo] Failed to load staff info for user %s: %v", userID, err)
+	}
 
 	type verifyStats struct {
 		VerifiedCount  int64   `gorm:"column:verified_count"`
@@ -1460,7 +1482,9 @@ func (r *kpiLogRepository) GetStaffDetail(userID string, filter domain.KPIQueryF
 		WHERE a.id = ?
 		LIMIT 1
 	`
-	_ = r.db.Raw(adminSQL, userID).Scan(&info).Error
+	if err := r.db.Raw(adminSQL, userID).Scan(&info).Error; err != nil {
+		log.Printf("⚠️ [KPIRepo] Failed to load staff info for user %s: %v", userID, err)
+	}
 
 	whereSQL := "WHERE (k.target_user_id = ? OR k.actor_id = ?)"
 	args := []interface{}{userID, userID}
@@ -1638,7 +1662,9 @@ func (r *kpiLogRepository) GetManagerDetail(userID string, filter domain.KPIQuer
 		WHERE a.id = ?
 		LIMIT 1
 	`
-	_ = r.db.Raw(adminSQL, userID).Scan(&info).Error
+	if err := r.db.Raw(adminSQL, userID).Scan(&info).Error; err != nil {
+		log.Printf("⚠️ [KPIRepo] Failed to load staff info for user %s: %v", userID, err)
+	}
 
 	whereSQL := "WHERE k.actor_id = ? AND k.event_code IN ('COMPLAINT_MANAGER_ASSIGNED', 'COMPLAINT_CENTER_FORWARDED', 'COMPLAINT_DEPT_RETURNED')"
 	args := []interface{}{userID}

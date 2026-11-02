@@ -111,6 +111,7 @@ type KPIQueryFilter struct {
 	DepartmentID  string     `json:"department_id"`
 	DepartmentIDs []string   `json:"department_ids"`
 	UserID        string     `json:"user_id"`
+	CameraID      string     `json:"camera_id,omitempty"`
 	StartDate     *time.Time `json:"start_date"`
 	EndDate       *time.Time `json:"end_date"`
 }
@@ -143,6 +144,7 @@ type KPISummaryResponse struct {
 	CameraUptimeRate      float64            `json:"camera_uptime_rate,omitempty"`
 	TotalViewSessions     int64              `json:"total_view_sessions,omitempty"`
 	TotalWatchDurationMin int64              `json:"total_watch_duration_min,omitempty"`
+	TotalWatchDurationSec int64              `json:"total_watch_duration_sec,omitempty"`
 	CitizenViewCount      int64              `json:"citizen_view_count,omitempty"`
 	StaffViewCount        int64              `json:"staff_view_count,omitempty"`
 	PublicCameraCount     int64              `json:"public_camera_count,omitempty"`
@@ -166,6 +168,7 @@ type KPICCTVTopCamera struct {
 	AccessLevel      string `json:"access_level"`
 	TotalViews       int64  `json:"total_views"`
 	TotalDurationMin int64  `json:"total_duration_min"`
+	TotalDurationSec int64  `json:"total_duration_sec"`
 }
 
 type KPIStaffLeaderboardItem struct {

@@ -2,10 +2,9 @@ package repository
 
 import (
 	"errors"
-	"strings"
-	"time"
-
 	"super-app-chonburi-go/internal/domain"
+	"super-app-chonburi-go/pkg/crypto"
+	"time"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -48,14 +47,8 @@ func (r *verificationRepository) GetPaginated(query domain.VerificationQuery) (*
 
 	items := make([]domain.UserVerificationItem, len(infos))
 	for i, info := range infos {
-		idNum := info.IdentityNumberEncrypted
-		if strings.HasPrefix(idNum, "ENC_") {
-			idNum = idNum[4:]
-		}
-		laser := info.LaserIdEncrypted
-		if strings.HasPrefix(laser, "ENC_") {
-			laser = laser[4:]
-		}
+		idNum := crypto.DecryptPID(info.IdentityNumberEncrypted)
+		laser := crypto.DecryptPID(info.LaserIdEncrypted)
 
 		items[i] = domain.UserVerificationItem{
 			UserID:                    info.UserId,
@@ -114,14 +107,8 @@ func (r *verificationRepository) GetByID(userID uuid.UUID) (*domain.UserVerifica
 		return nil, err
 	}
 
-	idNum := info.IdentityNumberEncrypted
-	if strings.HasPrefix(idNum, "ENC_") {
-		idNum = idNum[4:]
-	}
-	laser := info.LaserIdEncrypted
-	if strings.HasPrefix(laser, "ENC_") {
-		laser = laser[4:]
-	}
+	idNum := crypto.DecryptPID(info.IdentityNumberEncrypted)
+	laser := crypto.DecryptPID(info.LaserIdEncrypted)
 
 	return &domain.UserVerificationItem{
 		UserID:                    info.UserId,
@@ -185,6 +172,17 @@ func (r *verificationRepository) Approve(req *domain.ApproveVerificationRequest,
 		"is_waste_fee_receipt":          req.IsWasteFeeReceipt,
 		"is_online_tax_payment_file":    req.IsOnlineTaxPaymentFile,
 		"is_online_tax_payment_receipt": req.IsOnlineTaxPaymentReceipt,
+	}
+
+	if req.IdentityNumber != "" {
+		cleanID := crypto.ExtractDigits(req.IdentityNumber)
+		if len(cleanID) == 13 {
+			encID, err := crypto.EncryptPID(cleanID)
+			if err == nil {
+				updates["identity_number_encrypted"] = encID
+				updates["identity_number_hash"] = crypto.HashPID(cleanID)
+			}
+		}
 	}
 	return r.db.Model(&domain.UserInformation{}).
 		Where("user_id = ?", req.UserID).

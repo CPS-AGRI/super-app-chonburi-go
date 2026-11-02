@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"net/http"
@@ -48,12 +47,25 @@ func captureSnapshots(db *gorm.DB, store storage.StorageProvider) {
 		return
 	}
 
+	if len(cameras) == 0 {
+		return
+	}
+
+	// Bounded Concurrency: Max 4 concurrent ffmpeg processes to prevent CPU starvation / OOM
+	sem := make(chan struct{}, 4)
+	var wg sync.WaitGroup
+
 	for _, cam := range cameras {
 		if cam.StreamURL == "" {
 			continue
 		}
 
+		wg.Add(1)
 		go func(c domain.CCTV) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
 			snapshotBytes, err := captureFrameFromURL(c.StreamURL, c.Name)
 			if err != nil {
 				log.Printf("WARNING: Failed to capture snapshot for %s: %v", c.Name, err)
@@ -61,7 +73,7 @@ func captureSnapshots(db *gorm.DB, store storage.StorageProvider) {
 			}
 
 			// Upload snapshot using storageProvider
-			filename := fmt.Sprintf("snapshots/%s_snapshot.jpg", c.Name)
+			filename := fmt.Sprintf("snapshots/%s_snapshot.jpg", c.ID)
 			url, err := store.Upload(bytes.NewReader(snapshotBytes), filename)
 			if err != nil {
 				log.Printf("ERROR: Failed to upload snapshot for %s: %v", c.Name, err)
@@ -77,6 +89,8 @@ func captureSnapshots(db *gorm.DB, store storage.StorageProvider) {
 			}
 		}(cam)
 	}
+
+	wg.Wait()
 }
 
 // captureFrameFromURL uses FFmpeg to capture 1 frame.
@@ -89,8 +103,10 @@ func captureFrameFromURL(streamURL string, camName string) ([]byte, error) {
 		inputURL = streamURL + "/index.m3u8"
 	}
 
-	// Temporary path to save the output jpeg
-	tmpFile := filepath.Join(os.TempDir(), fmt.Sprintf("%s_%s_tmp.jpg", camName, uuid.New().String()))
+	// Temporary path to save the output jpeg (sanitized filename)
+	safeCamName := strings.ReplaceAll(camName, "/", "_")
+	safeCamName = strings.ReplaceAll(safeCamName, " ", "_")
+	tmpFile := filepath.Join(os.TempDir(), fmt.Sprintf("%s_%s_tmp.jpg", safeCamName, uuid.New().String()))
 	defer os.Remove(tmpFile)
 
 	// ffmpeg command to capture 1 frame
@@ -119,18 +135,7 @@ func captureFrameFromURL(streamURL string, camName string) ([]byte, error) {
 }
 
 func getPlaceholderImage(camName string) ([]byte, error) {
-	// Try fetching a high quality street view placeholder image from unsplash
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Get("https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?w=400&q=80")
-	if err == nil && resp.StatusCode == http.StatusOK {
-		defer resp.Body.Close()
-		imgBytes, readErr := io.ReadAll(resp.Body)
-		if readErr == nil {
-			return imgBytes, nil
-		}
-	}
-
-	// Tiny JPEG fallback if offline or API is blocked
+	// Ultra fast in-memory fallback without blocking external network I/O
 	tinyJPEG := []byte{
 		0xff, 0xd8, 0xff, 0xdb, 0x00, 0x43, 0x00, 0x08, 0x06, 0x06, 0x07, 0x06, 0x05, 0x08, 0x07, 0x07,
 		0x07, 0x09, 0x09, 0x08, 0x0a, 0x0c, 0x14, 0x0d, 0x0c, 0x0b, 0x0b, 0x0c, 0x19, 0x12, 0x13, 0x0f,

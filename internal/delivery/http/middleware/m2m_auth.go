@@ -87,19 +87,7 @@ func verifyM2M(c fiber.Ctx, cfg *config.Config) error {
 		})
 	}
 
-	// 2. Nonce single-use check (Prevent replay attacks within freshness window)
-	if redis.Client != nil {
-		nonceKey := fmt.Sprintf("m2m:nonce:%s:%s", m2mKey, nonce)
-		set, err := redis.Client.SetNX(c.Context(), nonceKey, "1", 300*time.Second).Result()
-		if err == nil && !set {
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-				"success": false,
-				"error":   "Unauthorized: Replay nonce detected",
-			})
-		}
-	}
-
-	// 3. Construct Canonical String
+	// 2. Construct Canonical String
 	method := strings.ToUpper(c.Method())
 	path := c.Path()
 
@@ -112,7 +100,7 @@ func verifyM2M(c fiber.Ctx, cfg *config.Config) error {
 
 	canonical := fmt.Sprintf("%s\n%s\n%s\n%s\n%s", method, path, sortedQuery, tsHeader, nonce)
 
-	// 4. Compute HMAC-SHA256
+	// 3. Compute and Verify HMAC-SHA256 FIRST (Prevent unauthenticated cache flooding / DoS)
 	mac := hmac.New(sha256.New, []byte(secretKey))
 	mac.Write([]byte(canonical))
 	expectedSig := hex.EncodeToString(mac.Sum(nil))
@@ -122,6 +110,25 @@ func verifyM2M(c fiber.Ctx, cfg *config.Config) error {
 			"success": false,
 			"error":   "Unauthorized: Invalid M2M signature",
 		})
+	}
+
+	// 4. Nonce single-use check (Prevent replay attacks within freshness window)
+	// Committed ONLY after signature has been authenticated
+	if redis.Client != nil {
+		nonceKey := fmt.Sprintf("m2m:nonce:%s:%s", m2mKey, nonce)
+		set, err := redis.Client.SetNX(c.Context(), nonceKey, "1", 300*time.Second).Result()
+		if err != nil {
+			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
+				"success": false,
+				"error":   "Service Unavailable: Security nonce store unreachable",
+			})
+		}
+		if !set {
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+				"success": false,
+				"error":   "Unauthorized: Replay nonce detected",
+			})
+		}
 	}
 
 	return nil

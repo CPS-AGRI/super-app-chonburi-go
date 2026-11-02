@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"super-app-chonburi-go/internal/domain"
 	"super-app-chonburi-go/pkg/storage"
@@ -693,4 +694,27 @@ func (u *publicRelationUseCase) UploadWelcomeScreen(screen *domain.MunicipalityW
 		screen.UpdatedBy = admin.Name + " " + admin.LastName
 		return u.repo.UpdateWelcomeScreen(screen)
 	}
+}
+
+func (u *publicRelationUseCase) DeleteWelcomeScreen(id string) error {
+	screen, err := u.repo.GetWelcomeScreenByID(id)
+	if err != nil {
+		return err
+	}
+
+	if err := u.repo.DeleteWelcomeScreen(id); err != nil {
+		return err
+	}
+
+	if screen != nil && screen.ImageUrl != "" && !strings.HasPrefix(screen.ImageUrl, "data:") {
+		go func(imageUrl string) {
+			if err := u.storageProvider.Delete(imageUrl); err != nil {
+				log.Printf("⚠️ [MinIO-AsyncDelete] Warning: failed to delete welcome screen image from storage (%s): %v", imageUrl, err)
+			} else {
+				log.Printf("🧹 [MinIO-AsyncDelete] Successfully deleted welcome screen image from storage: %s", imageUrl)
+			}
+		}(screen.ImageUrl)
+	}
+
+	return nil
 }

@@ -372,6 +372,15 @@ func (r *publicRelationRepository) GetWelcomeScreens() ([]domain.MunicipalityWel
 	return screens, err
 }
 
+func (r *publicRelationRepository) GetWelcomeScreenByID(id string) (*domain.MunicipalityWelcomeScreen, error) {
+	var screen domain.MunicipalityWelcomeScreen
+	err := r.db.Where("id = ?", id).First(&screen).Error
+	if err != nil {
+		return nil, err
+	}
+	return &screen, nil
+}
+
 func (r *publicRelationRepository) CreateWelcomeScreen(screen *domain.MunicipalityWelcomeScreen) error {
 	return r.db.Create(screen).Error
 }

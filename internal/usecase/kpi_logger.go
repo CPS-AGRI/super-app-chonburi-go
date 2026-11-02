@@ -80,12 +80,21 @@ func (l *asyncKPILogger) workerLoop(workerID int) {
 	for {
 		select {
 		case <-l.stopSignal:
-			// Drain remaining queue before shutdown
-			for len(l.queue) > 0 {
-				item := <-l.queue
-				batch = append(batch, *item)
-				if len(batch) >= defaultBatchSize {
-					flush()
+			// Safely drain remaining queue via non-blocking select across multiple workers
+			drain := true
+			for drain {
+				select {
+				case item, ok := <-l.queue:
+					if !ok {
+						drain = false
+						break
+					}
+					batch = append(batch, *item)
+					if len(batch) >= defaultBatchSize {
+						flush()
+					}
+				default:
+					drain = false
 				}
 			}
 			flush()

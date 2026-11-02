@@ -28,7 +28,8 @@ type FCMWorkerPool struct {
 	queue       chan FCMPayload
 	deadTokenCh chan string
 	workerCount int
-	wg          sync.WaitGroup
+	workersWg   sync.WaitGroup
+	purgerWg    sync.WaitGroup
 	ctx         context.Context
 	cancel      context.CancelFunc
 	isRunning   bool
@@ -86,17 +87,17 @@ func (p *FCMWorkerPool) Start() {
 	log.Printf("[FCM-WorkerPool] กำลังเปิดทำงานจำนวน %d Workers (Queue Size: %d, DeadToken Channel: %d)...",
 		p.workerCount, cap(p.queue), cap(p.deadTokenCh))
 
-	p.wg.Add(1)
+	p.purgerWg.Add(1)
 	go p.deadTokenPurger()
 
 	for i := 1; i <= p.workerCount; i++ {
-		p.wg.Add(1)
+		p.workersWg.Add(1)
 		go p.worker(i)
 	}
 }
 
 func (p *FCMWorkerPool) worker(workerID int) {
-	defer p.wg.Done()
+	defer p.workersWg.Done()
 	log.Printf("[FCM-Worker-%d] สแตนด์บายพร้อมประมวลผลงาน", workerID)
 
 	for {
@@ -117,7 +118,7 @@ func (p *FCMWorkerPool) worker(workerID int) {
 }
 
 func (p *FCMWorkerPool) deadTokenPurger() {
-	defer p.wg.Done()
+	defer p.purgerWg.Done()
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 	var batch []string
@@ -289,7 +290,8 @@ func (p *FCMWorkerPool) Stop() {
 	log.Println("[FCM-WorkerPool] กำลังทำความสะอาดคิวและสั่งหยุดการทำงาน (Graceful Shutdown)...")
 	p.cancel()
 	close(p.queue)
+	p.workersWg.Wait() // รอ Worker ทั้งหมดหยุดส่ง Token เข้า DeadToken Channel
 	close(p.deadTokenCh)
-	p.wg.Wait()
+	p.purgerWg.Wait() // รอ Purger ล้างและบันทึก Token รอบสุดท้าย
 	log.Println("[FCM-WorkerPool] หยุดการทำงานอย่างสมบูรณ์ ปราศจาก Goroutine leak")
 }

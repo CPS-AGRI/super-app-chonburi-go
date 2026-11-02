@@ -20,22 +20,6 @@ func (u *municipalityWorkScheduleUseCase) GetAllShifts() ([]domain.MunicipalityW
 }
 
 func (u *municipalityWorkScheduleUseCase) SaveShift(schedule *domain.MunicipalityWorkSchedule) error {
-
-	allShifts, err := u.GetAllShifts()
-	if err == nil {
-		for _, s := range allShifts {
-			if s.ID == schedule.ID {
-				continue
-			}
-			if s.WorkingDay == schedule.WorkingDay {
-
-				if schedule.WorkingHoursStart < s.WorkingHoursEnd && schedule.WorkingHoursEnd > s.WorkingHoursStart {
-					return domain.ErrScheduleOverlap
-				}
-			}
-		}
-	}
-
 	if schedule.ID == uuid.Nil {
 		schedule.ID = uuid.New()
 		schedule.CreatedAt = time.Now()

@@ -36,6 +36,10 @@ type Config struct {
 
 	// M2M Dashboard Security
 	M2MSecretKey string
+
+	// PDPA Citizen ID / PII Security (AES-256-GCM + Blind Index HMAC)
+	PIDEncryptionKey string
+	PIDHmacSecret    string
 }
 
 type RedisConfig struct {
@@ -180,7 +184,7 @@ func LoadConfig() *Config {
 	return &Config{
 		AppEnv:               appEnv,
 		AppPort:              port,
-		AutoMigrate:          getEnvBool("AUTO_MIGRATE", true),
+		AutoMigrate:          getEnvBool("AUTO_MIGRATE", false),
 		DBDsn:                dsn,
 		OrgName:              orgName,
 		OrgLogoURL:           orgLogoURL,
@@ -197,6 +201,8 @@ func LoadConfig() *Config {
 		FahfonWeatherMapURL:  fahfonWeatherMapURL,
 		FahfonServiceKey:     fahfonServiceKey,
 		M2MSecretKey:         m2mSecretKey,
+		PIDEncryptionKey:     os.Getenv("PID_ENCRYPTION_KEY"),
+		PIDHmacSecret:        os.Getenv("PID_HMAC_SECRET"),
 		MinIO: MinIOConfig{
 			Endpoint:        minioEndpoint,
 			AccessKey:       minioAccessKey,

@@ -39,6 +39,7 @@ func parseKPIFilter(c fiber.Ctx) domain.KPIQueryFilter {
 		ModuleKey:    c.Query("module_key", domain.ModuleKeyComplaint),
 		DepartmentID: c.Query("department_id"),
 		UserID:       c.Query("user_id"),
+		CameraID:     c.Query("camera_id"),
 	}
 
 	deptIDsStr := c.Query("department_ids")

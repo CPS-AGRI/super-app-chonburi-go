@@ -109,6 +109,9 @@ func (PublicRelationComment) TableName() string { return "module_public_relation
 
 type MunicipalityWelcomeScreen struct {
 	ID          uuid.UUID `gorm:"type:uuid;primaryKey;column:id" json:"id"`
+	Title       string    `gorm:"type:text;column:title" json:"title"`
+	Description string    `gorm:"type:text;column:description" json:"description"`
+	LinkUrl     string    `gorm:"type:text;column:link_url" json:"link_url"`
 	ImageUrl    string    `gorm:"type:text;not null;column:image_url" json:"image_url"`
 	IsActive    bool      `gorm:"type:boolean;not null;default:false;column:is_active" json:"is_active"`
 	Type        string    `gorm:"type:text;not null;column:type" json:"type"`
@@ -221,6 +224,7 @@ type PublicRelationRepository interface {
 	DeleteNotification(moduleId string, id string) error
 
 	GetWelcomeScreens() ([]MunicipalityWelcomeScreen, error)
+	GetWelcomeScreenByID(id string) (*MunicipalityWelcomeScreen, error)
 	CreateWelcomeScreen(screen *MunicipalityWelcomeScreen) error
 	UpdateWelcomeScreen(screen *MunicipalityWelcomeScreen) error
 	DeleteWelcomeScreen(id string) error
@@ -250,4 +254,5 @@ type PublicRelationUseCase interface {
 
 	GetWelcomeScreens() ([]MunicipalityWelcomeScreen, error)
 	UploadWelcomeScreen(screen *MunicipalityWelcomeScreen, adminID string) error
+	DeleteWelcomeScreen(id string) error
 }
