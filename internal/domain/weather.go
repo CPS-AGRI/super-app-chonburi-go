@@ -202,3 +202,25 @@ type WeatherStationMetadata struct {
 func (WeatherStationMetadata) TableName() string {
 	return "weather_station_metadata"
 }
+
+// TelemetryHistoryRecord represents a historical IoT sensor telemetry record from TimescaleDB
+type TelemetryHistoryRecord struct {
+	Time           string  `json:"time"`
+	TimeOnsite     string  `json:"time_onsite"`
+	Temp           float64 `json:"temp"`
+	Humid          float64 `json:"humid"`
+	Press          float64 `json:"press"`
+	RainRate       float64 `json:"rain_rate"`
+	RainHourly     float64 `json:"rain_hourly"`
+	RainDaily      float64 `json:"rain_daily"`
+	PM1            float64 `json:"pm1"`
+	PM25           float64 `json:"pm25"`
+	PM40           float64 `json:"pm40"`
+	PM10           float64 `json:"pm10"`
+	WindSpeed      float64 `json:"wind_speed"`
+	WindDirection  float64 `json:"wind_direction"`
+	CO2            float64 `json:"co2"`
+	UV             float64 `json:"uv"`
+	Battery        float64 `json:"battery"`
+	SignalStrength float64 `json:"signal_strength"`
+}

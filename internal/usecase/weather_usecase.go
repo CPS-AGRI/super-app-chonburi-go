@@ -30,6 +30,9 @@ type WeatherUseCase interface {
 	// Station Metadata & Custom Aliases
 	GetStationMetadata(ctx context.Context, serial string) (*domain.WeatherStationMetadata, error)
 	UpsertStationMetadata(ctx context.Context, meta *domain.WeatherStationMetadata) error
+
+	// Station History Telemetry
+	GetStationHistory(ctx context.Context, serial string, rangeType string, date string) ([]domain.TelemetryHistoryRecord, error)
 }
 
 type weatherUseCase struct {
@@ -325,4 +328,14 @@ func (u *weatherUseCase) GetStationMetadata(ctx context.Context, serial string) 
 
 func (u *weatherUseCase) UpsertStationMetadata(ctx context.Context, meta *domain.WeatherStationMetadata) error {
 	return u.repo.UpsertStationMetadata(ctx, meta)
+}
+
+func (u *weatherUseCase) GetStationHistory(ctx context.Context, serial string, rangeType string, date string) ([]domain.TelemetryHistoryRecord, error) {
+	var imei string
+	sensor, err := u.GetSensorBySerial(ctx, serial)
+	if err == nil && sensor != nil {
+		imei = sensor.HardwareIMEI
+	}
+
+	return u.repo.FetchStationHistory(ctx, serial, imei, rangeType, date)
 }

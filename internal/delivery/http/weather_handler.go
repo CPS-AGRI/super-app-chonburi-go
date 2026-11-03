@@ -26,6 +26,8 @@ func (h *WeatherHandler) RegisterRoutes(router fiber.Router) {
 	group.Get("/devices", h.GetStations)
 	group.Get("/stations/:serial", h.GetStationBySerial)
 	group.Get("/devices/:serial", h.GetStationBySerial)
+	group.Get("/stations/:serial/history", h.GetStationHistory)
+	group.Get("/devices/:serial/history", h.GetStationHistory)
 
 	// Summary statistics for Web Admin
 	group.Get("/stats", h.GetDashboardStats)
@@ -107,6 +109,28 @@ func (h *WeatherHandler) GetStationBySerial(c fiber.Ctx) error {
 		"success": true,
 		"sensor":  sensor,
 		"data":    sensor,
+	})
+}
+
+func (h *WeatherHandler) GetStationHistory(c fiber.Ctx) error {
+	ctx := c.Context()
+	serial := c.Params("serial")
+	rangeType := c.Query("range", "hourly")
+	date := c.Query("date")
+
+	history, err := h.useCase.GetStationHistory(ctx, serial, rangeType, date)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"success": false,
+			"error":   err.Error(),
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"history": history,
+		"items":   history,
+		"total":   len(history),
 	})
 }
 
