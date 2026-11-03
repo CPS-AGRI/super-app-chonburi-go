@@ -59,6 +59,21 @@ type WeatherRepository interface {
 	GetPattaya165List() []domain.PattayaStationMeta
 	GetPattaya165Meta(serial string) (domain.PattayaStationMeta, bool)
 	FlushCache(ctx context.Context)
+
+	// Alert Settings (Real Database in PostgreSQL)
+	GetAlertSettings(ctx context.Context) ([]domain.WeatherAlertSetting, error)
+	CreateAlertSetting(ctx context.Context, item *domain.WeatherAlertSetting) error
+	UpdateAlertSetting(ctx context.Context, id string, updates map[string]interface{}) (*domain.WeatherAlertSetting, error)
+	DeleteAlertSetting(ctx context.Context, id string) error
+
+	// Card Templates
+	GetCardTemplates(ctx context.Context) (map[string]string, error)
+	UpdateCardTemplate(ctx context.Context, severity, backgroundURL, updatedBy string) error
+
+	// Station Metadata & Custom Aliases
+	GetStationMetadata(ctx context.Context, serial string) (*domain.WeatherStationMetadata, error)
+	GetAllStationMetadata(ctx context.Context) (map[string]domain.WeatherStationMetadata, error)
+	UpsertStationMetadata(ctx context.Context, meta *domain.WeatherStationMetadata) error
 }
 
 type weatherRepository struct {
@@ -242,6 +257,17 @@ func (r *weatherRepository) FetchAllSensors(ctx context.Context) ([]domain.Weath
 			}
 		}
 
+		// Load custom station metadata/aliases from Chonburi DB
+		customMetaMap := make(map[string]domain.WeatherStationMetadata)
+		if r.db != nil {
+			var metas []domain.WeatherStationMetadata
+			if err := r.db.WithContext(ctx).Find(&metas).Error; err == nil {
+				for _, m := range metas {
+					customMetaMap[m.Serial] = m
+				}
+			}
+		}
+
 		// Normalize & Deduplicate by Serial/IMEI
 		sensorMap := make(map[string]domain.WeatherSensor)
 		for _, it := range rawItems {
@@ -323,6 +349,26 @@ func (r *weatherRepository) FetchAllSensors(ctx context.Context) ([]domain.Weath
 				order = meta.Order
 				deviceName = fmt.Sprintf("เสาตรวจวัด %s (%s)", poleCode, adminZone)
 				siteName = fmt.Sprintf("%s ต.%s อ.%s", adminZone, subdistrict, district)
+			}
+
+			// Custom Alias / Landmark Override from Chonburi DB
+			if customMeta, hasCustom := customMetaMap[serial]; hasCustom && customMeta.CustomName != "" {
+				deviceName = customMeta.CustomName
+				if customMeta.PoleCode != "" {
+					poleCode = customMeta.PoleCode
+				}
+				if customMeta.Subdistrict != "" {
+					subdistrict = customMeta.Subdistrict
+				}
+				if customMeta.District != "" {
+					district = customMeta.District
+				}
+				if customMeta.AdminZone != "" {
+					adminZone = customMeta.AdminZone
+				}
+				if customMeta.LandmarkDesc != "" {
+					siteName = fmt.Sprintf("%s (%s ต.%s อ.%s)", customMeta.LandmarkDesc, adminZone, subdistrict, district)
+				}
 			}
 
 			updatedTime := timeStr
@@ -562,4 +608,128 @@ func formatFrameTime(formatted string) string {
 		return fmt.Sprintf("%s:%s น.", hh, mm)
 	}
 	return formatted
+}
+
+// --- Alert Settings CRUD (PostgreSQL) ---
+
+func (r *weatherRepository) GetAlertSettings(ctx context.Context) ([]domain.WeatherAlertSetting, error) {
+	if r.db == nil {
+		return nil, fmt.Errorf("database connection unavailable")
+	}
+	var settings []domain.WeatherAlertSetting
+	err := r.db.WithContext(ctx).Order("created_at DESC").Find(&settings).Error
+	return settings, err
+}
+
+func (r *weatherRepository) CreateAlertSetting(ctx context.Context, item *domain.WeatherAlertSetting) error {
+	if r.db == nil {
+		return fmt.Errorf("database connection unavailable")
+	}
+	if item.ID == "" {
+		item.ID = fmt.Sprintf("W-%03d", time.Now().UnixNano()%1000)
+	}
+	item.CreatedAt = time.Now()
+	item.UpdatedAt = time.Now()
+	return r.db.WithContext(ctx).Create(item).Error
+}
+
+func (r *weatherRepository) UpdateAlertSetting(ctx context.Context, id string, updates map[string]interface{}) (*domain.WeatherAlertSetting, error) {
+	if r.db == nil {
+		return nil, fmt.Errorf("database connection unavailable")
+	}
+	updates["updated_at"] = time.Now()
+	var setting domain.WeatherAlertSetting
+	if err := r.db.WithContext(ctx).Where("id = ?", id).First(&setting).Error; err != nil {
+		return nil, err
+	}
+	if err := r.db.WithContext(ctx).Model(&setting).Updates(updates).Error; err != nil {
+		return nil, err
+	}
+	r.db.WithContext(ctx).Where("id = ?", id).First(&setting)
+	return &setting, nil
+}
+
+func (r *weatherRepository) DeleteAlertSetting(ctx context.Context, id string) error {
+	if r.db == nil {
+		return fmt.Errorf("database connection unavailable")
+	}
+	return r.db.WithContext(ctx).Where("id = ?", id).Delete(&domain.WeatherAlertSetting{}).Error
+}
+
+// --- Card Templates Management ---
+
+func (r *weatherRepository) GetCardTemplates(ctx context.Context) (map[string]string, error) {
+	result := map[string]string{
+		"info":    "/images/weather-templates/bg_info_cinematic.jpg",
+		"warning": "/images/weather-templates/bg_warning_cinematic.jpg",
+		"danger":  "/images/weather-templates/bg_danger_cinematic.jpg",
+	}
+	if r.db == nil {
+		return result, nil
+	}
+	var templates []domain.WeatherCardTemplate
+	if err := r.db.WithContext(ctx).Find(&templates).Error; err == nil {
+		for _, t := range templates {
+			if t.BackgroundURL != "" {
+				result[t.Severity] = t.BackgroundURL
+			}
+		}
+	}
+	return result, nil
+}
+
+func (r *weatherRepository) UpdateCardTemplate(ctx context.Context, severity, backgroundURL, updatedBy string) error {
+	if r.db == nil {
+		return fmt.Errorf("database connection unavailable")
+	}
+	template := domain.WeatherCardTemplate{
+		Severity:      severity,
+		BackgroundURL: backgroundURL,
+		UpdatedBy:     updatedBy,
+		UpdatedAt:     time.Now(),
+	}
+	return r.db.WithContext(ctx).Save(&template).Error
+}
+
+// --- Station Metadata & Custom Aliases ---
+
+func (r *weatherRepository) GetStationMetadata(ctx context.Context, serial string) (*domain.WeatherStationMetadata, error) {
+	if r.db == nil {
+		return nil, fmt.Errorf("database connection unavailable")
+	}
+	var meta domain.WeatherStationMetadata
+	err := r.db.WithContext(ctx).Where("serial = ?", serial).First(&meta).Error
+	if err != nil {
+		return nil, err
+	}
+	return &meta, nil
+}
+
+func (r *weatherRepository) GetAllStationMetadata(ctx context.Context) (map[string]domain.WeatherStationMetadata, error) {
+	result := make(map[string]domain.WeatherStationMetadata)
+	if r.db == nil {
+		return result, nil
+	}
+	var metas []domain.WeatherStationMetadata
+	err := r.db.WithContext(ctx).Find(&metas).Error
+	if err != nil {
+		return result, err
+	}
+	for _, m := range metas {
+		result[m.Serial] = m
+	}
+	return result, nil
+}
+
+func (r *weatherRepository) UpsertStationMetadata(ctx context.Context, meta *domain.WeatherStationMetadata) error {
+	if r.db == nil {
+		return fmt.Errorf("database connection unavailable")
+	}
+	meta.UpdatedAt = time.Now()
+	err := r.db.WithContext(ctx).Save(meta).Error
+	if err == nil {
+		// Invalidate cache immediately so new custom alias is active across all endpoints
+		r.FlushCache(ctx)
+	}
+	return err
 }

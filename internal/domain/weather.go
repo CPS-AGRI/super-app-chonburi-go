@@ -1,5 +1,7 @@
 package domain
 
+import "time"
+
 // Raw models returned from ff-weather-service (10.1.2.25:50059)
 
 type FahfonStationItem struct {
@@ -136,4 +138,60 @@ type WeatherQueryFilter struct {
 	Status    string // "normal" | "warning" | "danger" | "all"
 	Page      int
 	PageSize  int
+}
+
+// WeatherAlertSetting represents real persisted alert rules in PostgreSQL
+type WeatherAlertSetting struct {
+	ID              string    `gorm:"primaryKey;column:id" json:"id"`
+	Name            string    `gorm:"column:name;not null" json:"name"`
+	Parameter       string    `gorm:"column:parameter;not null" json:"parameter"` // pm25, rain_hourly, rain_daily, etc.
+	Condition       string    `gorm:"column:condition;not null" json:"condition"` // greater_than, less_than
+	Value           float64   `gorm:"column:value;not null" json:"value"`
+	Unit            string    `gorm:"column:unit;not null" json:"unit"`
+	Severity        string    `gorm:"column:severity;not null" json:"severity"` // info, warning, danger
+	MessageTitle    string    `gorm:"column:message_title;not null" json:"message_title"`
+	MessageBody     string    `gorm:"column:message_body;not null" json:"message_body"`
+	ImageMode       string    `gorm:"column:image_mode;default:'auto_card'" json:"image_mode"`
+	CustomImageURL  string    `gorm:"column:custom_image_url" json:"custom_image_url,omitempty"`
+	CooldownMinutes int       `gorm:"column:cooldown_minutes;default:60" json:"cooldown_minutes"`
+	SendSMS         bool      `gorm:"column:send_sms;default:false" json:"send_sms"`
+	SendPush        bool      `gorm:"column:send_push;default:true" json:"send_push"`
+	Status          string    `gorm:"column:status;default:'online'" json:"status"`
+	CreatedBy       string    `gorm:"column:created_by" json:"created_by"`
+	CreatedDate     string    `gorm:"column:created_date" json:"created_date"`
+	CreatedAt       time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	UpdatedAt       time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+}
+
+func (WeatherAlertSetting) TableName() string {
+	return "weather_alert_settings"
+}
+
+// WeatherCardTemplate represents background images for 3 alert severities
+type WeatherCardTemplate struct {
+	Severity      string    `gorm:"primaryKey;column:severity" json:"severity"` // info, warning, danger
+	BackgroundURL string    `gorm:"column:background_url;not null" json:"background_url"`
+	UpdatedBy     string    `gorm:"column:updated_by" json:"updated_by"`
+	UpdatedAt     time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+}
+
+func (WeatherCardTemplate) TableName() string {
+	return "weather_card_templates"
+}
+
+// WeatherStationMetadata represents custom aliases, landmarks, and overrides in Chonburi DB
+type WeatherStationMetadata struct {
+	Serial       string    `gorm:"primaryKey;column:serial" json:"serial"`
+	PoleCode     string    `gorm:"column:pole_code" json:"pole_code"`
+	CustomName   string    `gorm:"column:custom_name;not null" json:"custom_name"`
+	LandmarkDesc string    `gorm:"column:landmark_desc" json:"landmark_desc"`
+	Subdistrict  string    `gorm:"column:subdistrict" json:"subdistrict"`
+	District     string    `gorm:"column:district" json:"district"`
+	AdminZone    string    `gorm:"column:admin_zone" json:"admin_zone"`
+	UpdatedBy    string    `gorm:"column:updated_by" json:"updated_by"`
+	UpdatedAt    time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+}
+
+func (WeatherStationMetadata) TableName() string {
+	return "weather_station_metadata"
 }
