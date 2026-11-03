@@ -117,8 +117,10 @@ func (h *WeatherHandler) GetStationHistory(c fiber.Ctx) error {
 	serial := c.Params("serial")
 	rangeType := c.Query("range", "hourly")
 	date := c.Query("date")
+	startDate := c.Query("startDate", c.Query("start_date"))
+	endDate := c.Query("endDate", c.Query("end_date"))
 
-	history, err := h.useCase.GetStationHistory(ctx, serial, rangeType, date)
+	history, err := h.useCase.GetStationHistory(ctx, serial, rangeType, date, startDate, endDate)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"success": false,

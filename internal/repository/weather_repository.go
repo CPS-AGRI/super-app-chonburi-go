@@ -76,7 +76,7 @@ type WeatherRepository interface {
 	UpsertStationMetadata(ctx context.Context, meta *domain.WeatherStationMetadata) error
 
 	// Historical Telemetry Data from TimescaleDB
-	FetchStationHistory(ctx context.Context, serial, imei, rangeType, date string) ([]domain.TelemetryHistoryRecord, error)
+	FetchStationHistory(ctx context.Context, serial, imei, rangeType, date, startDate, endDate string) ([]domain.TelemetryHistoryRecord, error)
 }
 
 type weatherRepository struct {
@@ -744,7 +744,7 @@ func (r *weatherRepository) UpsertStationMetadata(ctx context.Context, meta *dom
 	return err
 }
 
-func (r *weatherRepository) FetchStationHistory(ctx context.Context, serial, imei, rangeType, date string) ([]domain.TelemetryHistoryRecord, error) {
+func (r *weatherRepository) FetchStationHistory(ctx context.Context, serial, imei, rangeType, date, startDate, endDate string) ([]domain.TelemetryHistoryRecord, error) {
 	if rangeType == "" {
 		rangeType = "hourly"
 	}
@@ -833,8 +833,15 @@ func (r *weatherRepository) FetchStationHistory(ctx context.Context, serial, ime
 	if r.cfg.FahfonWeatherBaseURL != "" && targetImei != "" {
 		baseURL := strings.TrimRight(r.cfg.FahfonWeatherBaseURL, "/")
 		reqURL := fmt.Sprintf("%s/api/v1/weather/stations/imei/%s/graph", baseURL, url.PathEscape(targetImei))
-		if date != "" {
-			reqURL += fmt.Sprintf("?date=%s", url.QueryEscape(date))
+		params := url.Values{}
+		if startDate != "" && endDate != "" {
+			params.Set("start_date", startDate)
+			params.Set("end_date", endDate)
+		} else if date != "" {
+			params.Set("date", date)
+		}
+		if len(params) > 0 {
+			reqURL += "?" + params.Encode()
 		}
 
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
@@ -890,6 +897,75 @@ func (r *weatherRepository) FetchStationHistory(ctx context.Context, serial, ime
 			} else if resp != nil {
 				resp.Body.Close()
 			}
+		}
+	}
+
+	// 3. Upstream Telemetry Service fallback
+	upstreamURL := fmt.Sprintf("https://microsis.mueangsmart.com/api/v1/fahfon-sense/devices/%s/detail?range=%s", url.PathEscape(serial), url.QueryEscape(rangeType))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, upstreamURL, nil)
+	if err == nil {
+		req.Header.Set("Accept", "application/json")
+		resp, err := r.httpClient.Do(req)
+		if err == nil && resp.StatusCode == http.StatusOK {
+			defer resp.Body.Close()
+			var detailResp struct {
+				History []struct {
+					TimeOnsite     string  `json:"time_onsite"`
+					Time           string  `json:"time"`
+					BucketTime     string  `json:"bucket_time"`
+					Temp           float64 `json:"temp"`
+					Humid          float64 `json:"humid"`
+					Press          float64 `json:"press"`
+					WindSpeed      float64 `json:"wind_speed"`
+					WindDirection  float64 `json:"wind_direction"`
+					RainRate       float64 `json:"rain_rate"`
+					RainHourly     float64 `json:"rain_hourly"`
+					RainDaily      float64 `json:"rain_daily"`
+					UV             float64 `json:"uv"`
+					CO2            float64 `json:"co2"`
+					PM1            float64 `json:"pm1"`
+					PM25           float64 `json:"pm25"`
+					PM40           float64 `json:"pm40"`
+					PM10           float64 `json:"pm10"`
+					Battery        float64 `json:"battery"`
+					SignalStrength float64 `json:"signal_strength"`
+				} `json:"history"`
+			}
+			if err := json.NewDecoder(resp.Body).Decode(&detailResp); err == nil && len(detailResp.History) > 0 {
+				records := make([]domain.TelemetryHistoryRecord, 0, len(detailResp.History))
+				for _, h := range detailResp.History {
+					timeVal := h.TimeOnsite
+					if timeVal == "" {
+						timeVal = h.Time
+					}
+					if timeVal == "" {
+						timeVal = h.BucketTime
+					}
+					records = append(records, domain.TelemetryHistoryRecord{
+						Time:           timeVal,
+						TimeOnsite:     timeVal,
+						Temp:           h.Temp,
+						Humid:          h.Humid,
+						Press:          h.Press,
+						RainRate:       h.RainRate,
+						RainHourly:     h.RainHourly,
+						RainDaily:      h.RainDaily,
+						PM1:            h.PM1,
+						PM25:           h.PM25,
+						PM40:           h.PM40,
+						PM10:           h.PM10,
+						WindSpeed:      h.WindSpeed,
+						WindDirection:  h.WindDirection,
+						CO2:            h.CO2,
+						UV:             h.UV,
+						Battery:        h.Battery,
+						SignalStrength: h.SignalStrength,
+					})
+				}
+				return records, nil
+			}
+		} else if resp != nil {
+			resp.Body.Close()
 		}
 	}
 
