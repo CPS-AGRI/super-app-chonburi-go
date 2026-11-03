@@ -749,88 +749,18 @@ func (r *weatherRepository) FetchStationHistory(ctx context.Context, serial, ime
 		rangeType = "hourly"
 	}
 
-	// 1. Try querying RiverServiceURL (IoT Core at 10.1.2.19:8081)
-	if r.cfg.RiverServiceURL != "" {
-		baseURL := strings.TrimRight(r.cfg.RiverServiceURL, "/")
-		reqURL := fmt.Sprintf("%s/api/v1/fahfon-sense/devices/%s/detail?range=%s", baseURL, url.PathEscape(serial), url.QueryEscape(rangeType))
-
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
-		if err == nil {
-			req.Header.Set("Accept", "application/json")
-			if r.cfg.FahfonServiceKey != "" {
-				req.Header.Set("x-service-key", r.cfg.FahfonServiceKey)
-			}
-			resp, err := r.httpClient.Do(req)
-			if err == nil && resp.StatusCode == http.StatusOK {
-				defer resp.Body.Close()
-				var detailResp struct {
-					History []struct {
-						TimeOnsite     string  `json:"time_onsite"`
-						Time           string  `json:"time"`
-						BucketTime     string  `json:"bucket_time"`
-						Temp           float64 `json:"temp"`
-						Humid          float64 `json:"humid"`
-						Press          float64 `json:"press"`
-						WindSpeed      float64 `json:"wind_speed"`
-						WindDirection  float64 `json:"wind_direction"`
-						RainRate       float64 `json:"rain_rate"`
-						RainHourly     float64 `json:"rain_hourly"`
-						RainDaily      float64 `json:"rain_daily"`
-						UV             float64 `json:"uv"`
-						CO2            float64 `json:"co2"`
-						PM1            float64 `json:"pm1"`
-						PM25           float64 `json:"pm25"`
-						PM40           float64 `json:"pm40"`
-						PM10           float64 `json:"pm10"`
-						Battery        float64 `json:"battery"`
-						SignalStrength float64 `json:"signal_strength"`
-					} `json:"history"`
-				}
-				if err := json.NewDecoder(resp.Body).Decode(&detailResp); err == nil && len(detailResp.History) > 0 {
-					records := make([]domain.TelemetryHistoryRecord, 0, len(detailResp.History))
-					for _, h := range detailResp.History {
-						timeVal := h.TimeOnsite
-						if timeVal == "" {
-							timeVal = h.Time
-						}
-						if timeVal == "" {
-							timeVal = h.BucketTime
-						}
-						records = append(records, domain.TelemetryHistoryRecord{
-							Time:           timeVal,
-							TimeOnsite:     timeVal,
-							Temp:           h.Temp,
-							Humid:          h.Humid,
-							Press:          h.Press,
-							RainRate:       h.RainRate,
-							RainHourly:     h.RainHourly,
-							RainDaily:      h.RainDaily,
-							PM1:            h.PM1,
-							PM25:           h.PM25,
-							PM40:           h.PM40,
-							PM10:           h.PM10,
-							WindSpeed:      h.WindSpeed,
-							WindDirection:  h.WindDirection,
-							CO2:            h.CO2,
-							UV:             h.UV,
-							Battery:        h.Battery,
-							SignalStrength: h.SignalStrength,
-						})
-					}
-					return records, nil
-				}
-			} else if resp != nil {
-				resp.Body.Close()
-			}
-		}
-	}
-
-	// 2. Try querying FahfonWeatherBaseURL (ff-weather-service at 10.1.2.25:50059)
 	targetImei := imei
 	if targetImei == "" {
 		targetImei = serial
 	}
-	if r.cfg.FahfonWeatherBaseURL != "" && targetImei != "" {
+
+	isRangeOrCustomDate := (startDate != "" && endDate != "") || date != ""
+
+	// Helper: Query FahfonWeatherBaseURL (ff-weather-service at 10.1.2.25:50059)
+	fetchFromFahfonWeather := func() ([]domain.TelemetryHistoryRecord, error) {
+		if r.cfg.FahfonWeatherBaseURL == "" || targetImei == "" {
+			return nil, fmt.Errorf("fahfon weather baseURL or imei empty")
+		}
 		baseURL := strings.TrimRight(r.cfg.FahfonWeatherBaseURL, "/")
 		reqURL := fmt.Sprintf("%s/api/v1/weather/stations/imei/%s/graph", baseURL, url.PathEscape(targetImei))
 		params := url.Values{}
@@ -845,58 +775,173 @@ func (r *weatherRepository) FetchStationHistory(ctx context.Context, serial, ime
 		}
 
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
-		if err == nil {
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("x-service-key", r.cfg.FahfonServiceKey)
+		req.Header.Set("Accept", "application/json")
+		resp, err := r.httpClient.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("fahfon weather HTTP status %d", resp.StatusCode)
+		}
+
+		var graphResp struct {
+			Parameters []struct {
+				Time             string  `json:"time"`
+				Temp             float64 `json:"temp"`
+				RelativeHumidity float64 `json:"relativeHumidity"`
+				BarometricPres   float64 `json:"barometricPres"`
+				WindSpeed        float64 `json:"windSpeed"`
+				WindDirection    float64 `json:"windDirection"`
+				RainIntensity    float64 `json:"rainIntensity"`
+				RainHourly       float64 `json:"rainHourly"`
+				RainDaily        float64 `json:"rainDaily"`
+				UV               float64 `json:"uv"`
+				PM1              float64 `json:"pm1"`
+				PM25             float64 `json:"pm25"`
+				PM4              float64 `json:"pm4"`
+				PM10             float64 `json:"pm10"`
+				CO2              float64 `json:"co2"`
+			} `json:"parameters"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&graphResp); err != nil {
+			return nil, err
+		}
+		if len(graphResp.Parameters) == 0 {
+			return nil, fmt.Errorf("no parameters in graph response")
+		}
+
+		records := make([]domain.TelemetryHistoryRecord, 0, len(graphResp.Parameters))
+		for _, p := range graphResp.Parameters {
+			records = append(records, domain.TelemetryHistoryRecord{
+				Time:          p.Time,
+				TimeOnsite:    p.Time,
+				Temp:          p.Temp,
+				Humid:         p.RelativeHumidity,
+				Press:         p.BarometricPres,
+				RainRate:      p.RainIntensity,
+				RainHourly:    p.RainHourly,
+				RainDaily:     p.RainDaily,
+				PM1:           p.PM1,
+				PM25:          p.PM25,
+				PM40:          p.PM4,
+				PM10:          p.PM10,
+				WindSpeed:     p.WindSpeed,
+				WindDirection: p.WindDirection,
+				CO2:           p.CO2,
+				UV:            p.UV,
+			})
+		}
+		return records, nil
+	}
+
+	// Helper: Query RiverServiceURL (IoT Core at 10.1.2.19:8081)
+	fetchFromRiverService := func() ([]domain.TelemetryHistoryRecord, error) {
+		if r.cfg.RiverServiceURL == "" {
+			return nil, fmt.Errorf("river service URL empty")
+		}
+		baseURL := strings.TrimRight(r.cfg.RiverServiceURL, "/")
+		reqURL := fmt.Sprintf("%s/api/v1/fahfon-sense/devices/%s/detail?range=%s", baseURL, url.PathEscape(serial), url.QueryEscape(rangeType))
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Accept", "application/json")
+		if r.cfg.FahfonServiceKey != "" {
 			req.Header.Set("x-service-key", r.cfg.FahfonServiceKey)
-			req.Header.Set("Accept", "application/json")
-			resp, err := r.httpClient.Do(req)
-			if err == nil && resp.StatusCode == http.StatusOK {
-				defer resp.Body.Close()
-				var graphResp struct {
-					Parameters []struct {
-						Time             string  `json:"time"`
-						Temp             float64 `json:"temp"`
-						RelativeHumidity float64 `json:"relativeHumidity"`
-						BarometricPres   float64 `json:"barometricPres"`
-						WindSpeed        float64 `json:"windSpeed"`
-						WindDirection    float64 `json:"windDirection"`
-						RainIntensity    float64 `json:"rainIntensity"`
-						RainHourly       float64 `json:"rainHourly"`
-						RainDaily        float64 `json:"rainDaily"`
-						UV               float64 `json:"uv"`
-						PM1              float64 `json:"pm1"`
-						PM25             float64 `json:"pm25"`
-						PM4              float64 `json:"pm4"`
-						PM10             float64 `json:"pm10"`
-						CO2              float64 `json:"co2"`
-					} `json:"parameters"`
-				}
-				if err := json.NewDecoder(resp.Body).Decode(&graphResp); err == nil && len(graphResp.Parameters) > 0 {
-					records := make([]domain.TelemetryHistoryRecord, 0, len(graphResp.Parameters))
-					for _, p := range graphResp.Parameters {
-						records = append(records, domain.TelemetryHistoryRecord{
-							Time:          p.Time,
-							TimeOnsite:    p.Time,
-							Temp:          p.Temp,
-							Humid:         p.RelativeHumidity,
-							Press:         p.BarometricPres,
-							RainRate:      p.RainIntensity,
-							RainHourly:    p.RainHourly,
-							RainDaily:     p.RainDaily,
-							PM1:           p.PM1,
-							PM25:          p.PM25,
-							PM40:          p.PM4,
-							PM10:          p.PM10,
-							WindSpeed:     p.WindSpeed,
-							WindDirection: p.WindDirection,
-							CO2:           p.CO2,
-							UV:            p.UV,
-						})
-					}
-					return records, nil
-				}
-			} else if resp != nil {
-				resp.Body.Close()
+		}
+		resp, err := r.httpClient.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("river service HTTP status %d", resp.StatusCode)
+		}
+
+		var detailResp struct {
+			History []struct {
+				TimeOnsite     string  `json:"time_onsite"`
+				Time           string  `json:"time"`
+				BucketTime     string  `json:"bucket_time"`
+				Temp           float64 `json:"temp"`
+				Humid          float64 `json:"humid"`
+				Press          float64 `json:"press"`
+				WindSpeed      float64 `json:"wind_speed"`
+				WindDirection  float64 `json:"wind_direction"`
+				RainRate       float64 `json:"rain_rate"`
+				RainHourly     float64 `json:"rain_hourly"`
+				RainDaily      float64 `json:"rain_daily"`
+				UV             float64 `json:"uv"`
+				CO2            float64 `json:"co2"`
+				PM1            float64 `json:"pm1"`
+				PM25           float64 `json:"pm25"`
+				PM40           float64 `json:"pm40"`
+				PM10           float64 `json:"pm10"`
+				Battery        float64 `json:"battery"`
+				SignalStrength float64 `json:"signal_strength"`
+			} `json:"history"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&detailResp); err != nil {
+			return nil, err
+		}
+		if len(detailResp.History) == 0 {
+			return nil, fmt.Errorf("no history in river service")
+		}
+
+		records := make([]domain.TelemetryHistoryRecord, 0, len(detailResp.History))
+		for _, h := range detailResp.History {
+			timeVal := h.TimeOnsite
+			if timeVal == "" {
+				timeVal = h.Time
 			}
+			if timeVal == "" {
+				timeVal = h.BucketTime
+			}
+			records = append(records, domain.TelemetryHistoryRecord{
+				Time:           timeVal,
+				TimeOnsite:     timeVal,
+				Temp:           h.Temp,
+				Humid:          h.Humid,
+				Press:          h.Press,
+				RainRate:       h.RainRate,
+				RainHourly:     h.RainHourly,
+				RainDaily:      h.RainDaily,
+				PM1:            h.PM1,
+				PM25:           h.PM25,
+				PM40:           h.PM40,
+				PM10:           h.PM10,
+				WindSpeed:      h.WindSpeed,
+				WindDirection:  h.WindDirection,
+				CO2:            h.CO2,
+				UV:             h.UV,
+				Battery:        h.Battery,
+				SignalStrength: h.SignalStrength,
+			})
+		}
+		return records, nil
+	}
+
+	// 1. If date range or custom date is specified, prioritize FahfonWeatherBaseURL (TimescaleDB)
+	if isRangeOrCustomDate {
+		if recs, err := fetchFromFahfonWeather(); err == nil && len(recs) > 0 {
+			return recs, nil
+		}
+		if recs, err := fetchFromRiverService(); err == nil && len(recs) > 0 {
+			return recs, nil
+		}
+	} else {
+		// 2. Otherwise default to RiverService, fallback to FahfonWeather
+		if recs, err := fetchFromRiverService(); err == nil && len(recs) > 0 {
+			return recs, nil
+		}
+		if recs, err := fetchFromFahfonWeather(); err == nil && len(recs) > 0 {
+			return recs, nil
 		}
 	}
 
