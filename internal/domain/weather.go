@@ -96,12 +96,19 @@ type WeatherSensor struct {
 	Temp              float64 `json:"temp"`        // Celsius
 	Temperature       float64 `json:"temperature"` // Celsius (Open API alias)
 	Humidity          float64 `json:"humidity"`    // %
-	RainRate          float64 `json:"rainRate"`    // mm/h
-	RainDaily         float64 `json:"rainDaily"`   // mm
-	WindSpeed         float64 `json:"windSpeed"`   // m/s
+	RainRate          float64 `json:"rainRate"`          // mm/h
+	RainHourly        float64 `json:"rainHourly"`        // mm/h
+	RainDaily         float64 `json:"rainDaily"`         // mm
+	WindSpeed         float64 `json:"windSpeed"`         // m/s
 	WindDirection     float64 `json:"windDirection"`
 	WindDirectionText string  `json:"windDirectionText"`
-	PM25              float64 `json:"pm25"`        // ug/m3
+	PM1               float64 `json:"pm1,omitempty"`     // ug/m3
+	PM25              float64 `json:"pm25"`              // ug/m3
+	PM4               float64 `json:"pm4,omitempty"`     // ug/m3
+	PM10              float64 `json:"pm10,omitempty"`    // ug/m3
+	CO2               float64 `json:"co2,omitempty"`     // ppm
+	UVIndex           float64 `json:"uvIndex,omitempty"` // UV Index
+	LightIntensity    float64 `json:"lightIntensity,omitempty"` // W/m2
 	Pressure          float64 `json:"pressure"`    // hPa
 	AirPressure       float64 `json:"airPressure"` // hPa alias
 	Status            string  `json:"status"`       // "normal" | "warning" | "danger"
