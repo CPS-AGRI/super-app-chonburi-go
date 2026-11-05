@@ -128,6 +128,9 @@ func (h *WaterLevelHandler) GetSnapshots(c fiber.Ctx) error {
 	}
 
 	date := c.Query("date")
+	if date == "" {
+		date = c.Query("startDate")
+	}
 	logs, err := h.useCase.GetSnapshots(ctx, serial, date)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{

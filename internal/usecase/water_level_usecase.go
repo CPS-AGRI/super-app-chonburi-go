@@ -294,6 +294,7 @@ func (u *waterLevelUseCase) GetSnapshots(ctx context.Context, serial, date strin
 			Time:       thaiTime,
 			ImageURL:   l.ImageURL,
 			WaterLevel: math.Round(waterLevelM*100) / 100,
+			Pct:        l.WaterLevelPct,
 		})
 	}
 	return logs, nil

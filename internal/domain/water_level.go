@@ -53,6 +53,7 @@ type WaterSnapshotLog struct {
 	Time       string  `json:"time"`
 	ImageURL   string  `json:"imageUrl,omitempty"`
 	WaterLevel float64 `json:"waterLevel"`
+	Pct        float64 `json:"pct,omitempty"`
 }
 
 // WaterDeviceDetail represents full telemetry of a station
