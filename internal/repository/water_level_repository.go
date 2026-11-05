@@ -35,6 +35,7 @@ type WaterLevelRepository interface {
 	FetchGatewayDevices(ctx context.Context) ([]domain.GatewayRiverDevice, error)
 	FetchGatewayDeviceDetail(ctx context.Context, serial string) (*domain.GatewayDeviceDetailEnvelope, error)
 	FetchGatewayDeviceHistory(ctx context.Context, serial string, timeframe int) ([]domain.GatewayHistoryPoint, error)
+	FetchGatewayDeviceHistoryRange(ctx context.Context, serial, startDate, endDate string) ([]domain.GatewayHistoryPoint, error)
 	FetchGatewaySnapshots(ctx context.Context, serial, date string) ([]domain.GatewaySnapshotLog, error)
 	InitGatewayStream(ctx context.Context, serial string) (*domain.WaterStreamResult, error)
 	TerminateGatewayStream(ctx context.Context, serial string) error
@@ -253,6 +254,34 @@ func (r *waterLevelRepository) FetchGatewayDeviceHistory(ctx context.Context, se
 
 	path := fmt.Sprintf("/api/v1/river/devices/%s/stats?start=%s&end=%s",
 		url.PathEscape(serial), url.QueryEscape(startTime), url.QueryEscape(endTime))
+	req, err := r.buildGatewayRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := r.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("gateway error %d: %s", resp.StatusCode, string(body))
+	}
+
+	var points []domain.GatewayHistoryPoint
+	if err := json.NewDecoder(resp.Body).Decode(&points); err != nil {
+		return nil, err
+	}
+	return points, nil
+}
+
+func (r *waterLevelRepository) FetchGatewayDeviceHistoryRange(ctx context.Context, serial, startDate, endDate string) ([]domain.GatewayHistoryPoint, error) {
+	q := url.Values{}
+	q.Set("start", startDate)
+	q.Set("end", endDate)
+	path := fmt.Sprintf("/api/v1/river/devices/%s/stats?%s", url.PathEscape(serial), q.Encode())
 	req, err := r.buildGatewayRequest(ctx, http.MethodGet, path, nil)
 	if err != nil {
 		return nil, err

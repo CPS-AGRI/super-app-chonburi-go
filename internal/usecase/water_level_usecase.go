@@ -21,6 +21,7 @@ type WaterLevelUseCase interface {
 	GetStations(ctx context.Context) ([]domain.WaterStation, error)
 	GetDeviceDetail(ctx context.Context, serial string) (*domain.WaterDeviceDetail, error)
 	GetDeviceHistory(ctx context.Context, serial string, timeframe int) ([]domain.WaterHistoryPoint, error)
+	GetDeviceHistoryRange(ctx context.Context, serial, startDate, endDate string) ([]domain.WaterHistoryPoint, error)
 	GetSnapshots(ctx context.Context, serial, date string) ([]domain.WaterSnapshotLog, error)
 	InitStream(ctx context.Context, serial string) (*domain.WaterStreamResult, error)
 	TerminateStream(ctx context.Context, serial string) error
@@ -224,24 +225,28 @@ func (u *waterLevelUseCase) GetDeviceDetail(ctx context.Context, serial string) 
 	onlineStatus := mapOnlineStatus(cur.Time, 60*time.Minute)
 
 	return &domain.WaterDeviceDetail{
-		ID:            dev.Serial,
-		Serial:        dev.Serial,
-		Name:          dev.Name,
-		Location:      dev.OrganizationName,
-		Lat:           lat,
-		Lng:           lng,
-		Status:        mapWarningStatus(dev.WarningStatus),
-		OnlineStatus:  onlineStatus,
-		WaterLevel:    math.Round(waterLevelM*100) / 100,
-		WaterLevelMax: math.Round(waterLevelMaxM*100) / 100,
-		LastUpdated:   thaiTime,
-		UpdatedAt:     iso8601,
-		Battery:       cur.Battery,
-		Solar:         cur.Solar,
-		CCTVStreamURL: cctvURL,
-		SnapshotURL:   snapURL,
-		CCTV:          cctvURL,
-		PctToBank:     pctToBank,
+		ID:              dev.Serial,
+		Serial:          dev.Serial,
+		Name:            dev.Name,
+		Location:        dev.OrganizationName,
+		Lat:             lat,
+		Lng:             lng,
+		Status:          mapWarningStatus(dev.WarningStatus),
+		OnlineStatus:    onlineStatus,
+		WaterLevel:      math.Round(waterLevelM*100) / 100,
+		WaterLevelMax:   math.Round(waterLevelMaxM*100) / 100,
+		NetWaterLevelCM: math.Round(cur.NetWaterLevelCM*100) / 100,
+		RawLevelCM:      math.Round(dev.LevelCM*100) / 100,
+		BottomToBankCM:  cfg.BottomToBankCM,
+		BankToSensorCM:  cfg.BankToSensorCM,
+		LastUpdated:     thaiTime,
+		UpdatedAt:       iso8601,
+		Battery:         cur.Battery,
+		Solar:           cur.Solar,
+		CCTVStreamURL:   cctvURL,
+		SnapshotURL:     snapURL,
+		CCTV:            cctvURL,
+		PctToBank:       pctToBank,
 	}, nil
 }
 
@@ -250,7 +255,18 @@ func (u *waterLevelUseCase) GetDeviceHistory(ctx context.Context, serial string,
 	if err != nil {
 		return []domain.WaterHistoryPoint{}, err
 	}
+	return mapHistoryPoints(rawPoints), nil
+}
 
+func (u *waterLevelUseCase) GetDeviceHistoryRange(ctx context.Context, serial, startDate, endDate string) ([]domain.WaterHistoryPoint, error) {
+	rawPoints, err := u.repo.FetchGatewayDeviceHistoryRange(ctx, serial, startDate, endDate)
+	if err != nil {
+		return []domain.WaterHistoryPoint{}, err
+	}
+	return mapHistoryPoints(rawPoints), nil
+}
+
+func mapHistoryPoints(rawPoints []domain.GatewayHistoryPoint) []domain.WaterHistoryPoint {
 	loc, _ := time.LoadLocation("Asia/Bangkok")
 	points := make([]domain.WaterHistoryPoint, 0, len(rawPoints))
 
@@ -265,19 +281,29 @@ func (u *waterLevelUseCase) GetDeviceHistory(ctx context.Context, serial string,
 
 		waterLevelM := pt.NetWaterLevelCM / 100.0
 
-		points = append(points, domain.WaterHistoryPoint{
-			Time:       pt.Time,
-			WaterLevel: math.Round(waterLevelM*100) / 100,
-			RainAmount: pt.RainAmount,
-			WindSpeed:  pt.WindSpeed,
-			HourLabel:  fmt.Sprintf("%02d:00", t.Hour()),
-			DateLabel:  t.Format("02/01"),
-			ISODate:    t.Format(time.RFC3339),
-			Pct:        pt.WaterLevelPct,
-		})
+		p := domain.WaterHistoryPoint{
+			Time:            pt.Time,
+			WaterLevel:      math.Round(waterLevelM*100) / 100,
+			RainAmount:      pt.RainAmount,
+			WindSpeed:       pt.WindSpeed,
+			HourLabel:       fmt.Sprintf("%02d:00", t.Hour()),
+			DateLabel:       t.Format("02/01"),
+			ISODate:         t.Format(time.RFC3339),
+			Pct:             pt.WaterLevelPct,
+			NetWaterLevelCM: math.Round(pt.NetWaterLevelCM*100) / 100,
+			RawLevelCM:      math.Round(pt.LevelCM*100) / 100,
+			FilterStatus:    pt.FilterStatus,
+			SnapshotURL:     pt.SnapshotURL0,
+		}
+		if pt.FilteredLevelCM != nil {
+			p.FilteredLevelCM = math.Round(*pt.FilteredLevelCM*100) / 100
+		}
+		if pt.ConfidenceScore != nil {
+			p.ConfidenceScore = *pt.ConfidenceScore
+		}
+		points = append(points, p)
 	}
-
-	return points, nil
+	return points
 }
 
 func (u *waterLevelUseCase) GetSnapshots(ctx context.Context, serial, date string) ([]domain.WaterSnapshotLog, error) {

@@ -24,17 +24,23 @@ type WaterStation struct {
 	PctToBank      float64             `json:"pctToBank"`
 }
 
-// WaterHistoryPoint represents a historical data point for charting
+// WaterHistoryPoint represents a historical data point for charting and telemetry table
 type WaterHistoryPoint struct {
-	Time       string  `json:"time"`
-	WaterLevel float64 `json:"waterLevel"` // meters
-	RainAmount float64 `json:"rainAmount"` // mm
-	WindSpeed  float64 `json:"windSpeed"`  // km/h
-	HourLabel  string  `json:"hourLabel,omitempty"`
-	DateLabel  string  `json:"dateLabel,omitempty"`
-	ISODate    string  `json:"isoDate,omitempty"`
-	Pct        float64 `json:"pct,omitempty"`
-	Status     string  `json:"status,omitempty"`
+	Time            string  `json:"time"`
+	WaterLevel      float64 `json:"waterLevel"` // meters
+	RainAmount      float64 `json:"rainAmount"` // mm
+	WindSpeed       float64 `json:"windSpeed"`  // km/h
+	HourLabel       string  `json:"hourLabel,omitempty"`
+	DateLabel       string  `json:"dateLabel,omitempty"`
+	ISODate         string  `json:"isoDate,omitempty"`
+	Pct             float64 `json:"pct,omitempty"`
+	Status          string  `json:"status,omitempty"`
+	RawLevelCM      float64 `json:"rawLevelCM,omitempty"`
+	NetWaterLevelCM float64 `json:"netWaterLevelCM,omitempty"`
+	FilteredLevelCM float64 `json:"filteredLevelCM,omitempty"`
+	ConfidenceScore float64 `json:"confidenceScore,omitempty"`
+	FilterStatus    string  `json:"filterStatus,omitempty"`
+	SnapshotURL     string  `json:"snapshotUrl,omitempty"`
 }
 
 // WaterAlert represents an active flood warning alert
@@ -58,24 +64,28 @@ type WaterSnapshotLog struct {
 
 // WaterDeviceDetail represents full telemetry of a station
 type WaterDeviceDetail struct {
-	ID            string  `json:"id"`
-	Serial        string  `json:"serial"`
-	Name          string  `json:"name"`
-	Location      string  `json:"location"`
-	Lat           float64 `json:"lat"`
-	Lng           float64 `json:"lng"`
-	Status        string  `json:"status"`
-	OnlineStatus  string  `json:"onlineStatus"` // "online" | "offline"
-	WaterLevel    float64 `json:"waterLevel"`
-	WaterLevelMax float64 `json:"waterLevelMax"`
-	LastUpdated   string  `json:"lastUpdated"`
-	UpdatedAt     string  `json:"updatedAt"` // ISO 8601
-	Battery       float64 `json:"battery,omitempty"`
-	Solar         float64 `json:"solar,omitempty"`
-	CCTVStreamURL string  `json:"cctvStreamUrl,omitempty"`
-	SnapshotURL   string  `json:"snapshotUrl,omitempty"`
-	CCTV          string  `json:"cctv,omitempty"`
-	PctToBank     float64 `json:"pctToBank,omitempty"`
+	ID              string  `json:"id"`
+	Serial          string  `json:"serial"`
+	Name            string  `json:"name"`
+	Location        string  `json:"location"`
+	Lat             float64 `json:"lat"`
+	Lng             float64 `json:"lng"`
+	Status          string  `json:"status"`
+	OnlineStatus    string  `json:"onlineStatus"` // "online" | "offline"
+	WaterLevel      float64 `json:"waterLevel"`
+	WaterLevelMax   float64 `json:"waterLevelMax"`
+	RawLevelCM      float64 `json:"rawLevelCM,omitempty"`
+	NetWaterLevelCM float64 `json:"netWaterLevelCM,omitempty"`
+	BottomToBankCM  float64 `json:"bottomToBankCM,omitempty"`
+	BankToSensorCM  float64 `json:"bankToSensorCM,omitempty"`
+	LastUpdated     string  `json:"lastUpdated"`
+	UpdatedAt       string  `json:"updatedAt"` // ISO 8601
+	Battery         float64 `json:"battery,omitempty"`
+	Solar           float64 `json:"solar,omitempty"`
+	CCTVStreamURL   string  `json:"cctvStreamUrl,omitempty"`
+	SnapshotURL     string  `json:"snapshotUrl,omitempty"`
+	CCTV            string  `json:"cctv,omitempty"`
+	PctToBank       float64 `json:"pctToBank,omitempty"`
 }
 
 // WaterStreamResult represents RTSP / HLS / WebRTC stream response
@@ -117,12 +127,18 @@ type GatewayRiverDevice struct {
 
 // GatewayHistoryPoint represents stats point from ff-river-services
 type GatewayHistoryPoint struct {
-	Time            string  `json:"time"`
-	NetWaterLevelCM float64 `json:"net_water_level_cm"`
-	WaterLevelPct   float64 `json:"water_level_pct"`
-	RainAmount      float64 `json:"rain_amount"`
-	WindSpeed       float64 `json:"wind_speed"`
-	SnapshotURL0    string  `json:"snapshot_url0"`
+	Time            string   `json:"time"`
+	LevelCM         float64  `json:"level_cm"`
+	NetWaterLevelCM float64  `json:"net_water_level_cm"`
+	WaterLevelPct   float64  `json:"water_level_pct"`
+	FilteredLevelCM *float64 `json:"filtered_level_cm,omitempty"`
+	ConfidenceScore *float64 `json:"confidence_score,omitempty"`
+	FilterStatus    string   `json:"filter_status,omitempty"`
+	RainAmount      float64  `json:"rain_amount"`
+	WindSpeed       float64  `json:"wind_speed"`
+	SnapshotURL0    string   `json:"snapshot_url0"`
+	SnapshotURL1    string   `json:"snapshot_url1,omitempty"`
+	VoltIn          *float64 `json:"volt_in,omitempty"`
 }
 
 // GatewaySnapshotLog represents snapshots from ff-river-services
@@ -150,6 +166,7 @@ type GatewayDeviceDetailEnvelope struct {
 		SnapshotURL1     string  `json:"snapshot_url1"`
 		CCTVPath0        string  `json:"cctv_path_0"`
 		CCTVPath1        string  `json:"cctv_path_1"`
+		LevelCM          float64 `json:"level_cm"`
 	} `json:"device"`
 	Current struct {
 		NetWaterLevelCM float64 `json:"net_water_level_cm"`

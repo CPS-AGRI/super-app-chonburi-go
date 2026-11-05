@@ -3,6 +3,7 @@ package http
 import (
 	"strconv"
 
+	"super-app-chonburi-go/internal/domain"
 	"super-app-chonburi-go/internal/usecase"
 
 	"github.com/gofiber/fiber/v3"
@@ -94,14 +95,31 @@ func (h *WaterLevelHandler) GetDeviceHistory(c fiber.Ctx) error {
 		})
 	}
 
-	timeframe := 168
-	if tfStr := c.Query("timeframe"); tfStr != "" {
-		if tf, err := strconv.Atoi(tfStr); err == nil && tf > 0 {
-			timeframe = tf
-		}
+	// Support explicit date-range (startDate/endDate or start/end in RFC3339)
+	startDate := c.Query("startDate")
+	if startDate == "" {
+		startDate = c.Query("start")
+	}
+	endDate := c.Query("endDate")
+	if endDate == "" {
+		endDate = c.Query("end")
 	}
 
-	history, err := h.useCase.GetDeviceHistory(ctx, serial, timeframe)
+	var history []domain.WaterHistoryPoint
+	var err error
+
+	if startDate != "" && endDate != "" {
+		history, err = h.useCase.GetDeviceHistoryRange(ctx, serial, startDate, endDate)
+	} else {
+		timeframe := 168
+		if tfStr := c.Query("timeframe"); tfStr != "" {
+			if tf, err2 := strconv.Atoi(tfStr); err2 == nil && tf > 0 {
+				timeframe = tf
+			}
+		}
+		history, err = h.useCase.GetDeviceHistory(ctx, serial, timeframe)
+	}
+
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"success": false,
