@@ -2,6 +2,7 @@ package http
 
 import (
 	"strconv"
+	"time"
 
 	"super-app-chonburi-go/internal/domain"
 	"super-app-chonburi-go/internal/usecase"
@@ -103,6 +104,18 @@ func (h *WaterLevelHandler) GetDeviceHistory(c fiber.Ctx) error {
 	endDate := c.Query("endDate")
 	if endDate == "" {
 		endDate = c.Query("end")
+	}
+
+	bkkLoc := time.FixedZone("Asia/Bangkok", 7*3600)
+	if startDate != "" && len(startDate) == 10 {
+		if t, err := time.ParseInLocation("2006-01-02", startDate, bkkLoc); err == nil {
+			startDate = t.Format(time.RFC3339)
+		}
+	}
+	if endDate != "" && len(endDate) == 10 {
+		if t, err := time.ParseInLocation("2006-01-02", endDate, bkkLoc); err == nil {
+			endDate = t.Add(23*time.Hour + 59*time.Minute + 59*time.Second).Format(time.RFC3339)
+		}
 	}
 
 	var history []domain.WaterHistoryPoint
