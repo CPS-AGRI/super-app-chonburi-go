@@ -1,8 +1,12 @@
 package usecase
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -33,6 +37,9 @@ type WeatherUseCase interface {
 
 	// Station History Telemetry
 	GetStationHistory(ctx context.Context, serial, rangeType, date, startDate, endDate string) ([]domain.TelemetryHistoryRecord, error)
+
+	// Test Alert Dispatch
+	DispatchTestAlert(ctx context.Context, subdistrict, district, severity, imageURL string) (int, error)
 }
 
 type weatherUseCase struct {
@@ -338,4 +345,49 @@ func (u *weatherUseCase) GetStationHistory(ctx context.Context, serial, rangeTyp
 	}
 
 	return u.repo.FetchStationHistory(ctx, serial, imei, rangeType, date, startDate, endDate)
+}
+
+func (u *weatherUseCase) DispatchTestAlert(ctx context.Context, subdistrict, district, severity, imageURL string) (int, error) {
+	alertServiceURL := os.Getenv("ALERT_SERVICE_URL")
+	if alertServiceURL == "" {
+		alertServiceURL = "http://127.0.0.1:8089"
+	}
+
+	payloadBytes, err := json.Marshal(map[string]string{
+		"subdistrict": subdistrict,
+		"district":    district,
+		"severity":    severity,
+		"image_url":   imageURL,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("failed to encode test alert payload: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", alertServiceURL+"/api/v1/alert/test", bytes.NewBuffer(payloadBytes))
+	if err != nil {
+		return 0, fmt.Errorf("failed to create request to alert microservice: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("failed to call alert microservice at %s: %w", alertServiceURL, err)
+	}
+	defer resp.Body.Close()
+
+	var res struct {
+		Success bool   `json:"success"`
+		SentTo  int    `json:"sent_to"`
+		Error   string `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+		return 0, fmt.Errorf("failed to decode alert microservice response: %w", err)
+	}
+
+	if !res.Success {
+		return 0, fmt.Errorf("alert microservice returned error: %s", res.Error)
+	}
+
+	return res.SentTo, nil
 }

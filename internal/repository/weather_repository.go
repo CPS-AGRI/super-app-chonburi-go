@@ -10,6 +10,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -93,6 +94,10 @@ type weatherRepository struct {
 	l1Mu       sync.RWMutex
 	l1Cache    []domain.WeatherSensor
 	l1CachedAt time.Time
+
+	// Spatial Resolver: tracks serials already resolved to subdistrict (resolve once per serial lifetime)
+	resolvedMu    sync.RWMutex
+	resolvedCache map[string]bool // serial -> already resolved & upserted
 }
 
 func NewWeatherRepository(db *gorm.DB, cfg *config.Config, rdb *redis.Client) WeatherRepository {
@@ -112,6 +117,7 @@ func NewWeatherRepository(db *gorm.DB, cfg *config.Config, rdb *redis.Client) We
 			Transport: tr,
 		},
 		pattaya165Map: make(map[string]domain.PattayaStationMeta),
+		resolvedCache: make(map[string]bool),
 	}
 
 	// Parse embedded Pattaya 165 Registry into memory (Zero disk I/O, O(1) lookup)
@@ -336,15 +342,17 @@ func (r *weatherRepository) FetchAllSensors(ctx context.Context) ([]domain.Weath
 				siteName = deviceName
 			}
 
-			// Metadata lookup from Pattaya 165 Registry
-			meta, hasMeta := r.GetPattaya165Meta(serial)
+			// --- Spatial Resolution: Lat/Lon → Subdistrict/District ---
+			// Priority: 1) customMeta (Admin override) 2) Pattaya 165 file 3) Spatial Resolver (Auto)
+
 			poleCode := ""
 			adminZone := ""
 			subdistrict := "ชลบุรี"
 			district := "ชลบุรี"
 			order := 0
 
-			if hasMeta {
+			// Priority 2: Pattaya 165 Registry (backward compat — only for matched serials)
+			if meta, hasMeta := r.GetPattaya165Meta(serial); hasMeta {
 				poleCode = meta.PoleCode
 				adminZone = meta.AdminZone
 				subdistrict = meta.Subdistrict
@@ -354,7 +362,7 @@ func (r *weatherRepository) FetchAllSensors(ctx context.Context) ([]domain.Weath
 				siteName = fmt.Sprintf("%s ต.%s อ.%s", adminZone, subdistrict, district)
 			}
 
-			// Custom Alias / Landmark Override from Chonburi DB
+			// Priority 1: Custom Alias / Landmark Override from Chonburi DB (highest priority)
 			if customMeta, hasCustom := customMetaMap[serial]; hasCustom && customMeta.CustomName != "" {
 				deviceName = customMeta.CustomName
 				if customMeta.PoleCode != "" {
@@ -371,6 +379,44 @@ func (r *weatherRepository) FetchAllSensors(ctx context.Context) ([]domain.Weath
 				}
 				if customMeta.LandmarkDesc != "" {
 					siteName = fmt.Sprintf("%s (%s ต.%s อ.%s)", customMeta.LandmarkDesc, adminZone, subdistrict, district)
+				}
+			} else if subdistrict == "ชลบุรี" && lat != 0 && lng != 0 {
+				// Priority 3: Spatial Auto-Resolve — only when subdistrict still unknown
+				// Check if this serial has already been resolved to avoid repeated UPSERT
+				r.resolvedMu.RLock()
+				alreadyResolved := r.resolvedCache[serial]
+				r.resolvedMu.RUnlock()
+
+				resolvedSub, resolvedDist := globalSpatialResolver.Resolve(lat, lng)
+				subdistrict = resolvedSub
+				district = resolvedDist
+
+				if !alreadyResolved && r.db != nil {
+					// Fire-and-forget UPSERT into weather_station_metadata (non-blocking)
+					go func(s, sub, dist string) {
+						upsertMeta := &domain.WeatherStationMetadata{
+							Serial:      s,
+							Subdistrict: sub,
+							District:    dist,
+						}
+						result := r.db.Where("serial = ?", s).FirstOrCreate(upsertMeta)
+						if result.Error == nil {
+							// If record existed but subdistrict was blank, patch it
+							if upsertMeta.Subdistrict == "" || upsertMeta.Subdistrict == "ชลบุรี" {
+								r.db.Model(upsertMeta).Where("serial = ?", s).Updates(map[string]interface{}{
+									"subdistrict": sub,
+									"district":    dist,
+								})
+							}
+							log.Printf("✅ [SpatialResolver] %s → ต.%s อ.%s (auto-mapped from Lat/Lon)", s, sub, dist)
+						} else {
+							log.Printf("⚠️ [SpatialResolver] UPSERT failed for %s: %v", s, result.Error)
+						}
+					}(serial, resolvedSub, resolvedDist)
+
+					r.resolvedMu.Lock()
+					r.resolvedCache[serial] = true
+					r.resolvedMu.Unlock()
 				}
 			}
 
@@ -669,10 +715,20 @@ func (r *weatherRepository) DeleteAlertSetting(ctx context.Context, id string) e
 // --- Card Templates Management ---
 
 func (r *weatherRepository) GetCardTemplates(ctx context.Context) (map[string]string, error) {
+	minioBase := os.Getenv("MINIO_PUBLIC_BASE_URL")
+	if minioBase == "" {
+		minioBase = "https://uat-super-app-chonburi-api.mueangsmart.com"
+	}
+	bucket := os.Getenv("MINIO_BUCKET")
+	if bucket == "" {
+		bucket = "super-app-assets"
+	}
+	baseURL := fmt.Sprintf("%s/%s/weather-templates", strings.TrimRight(minioBase, "/"), bucket)
+
 	result := map[string]string{
-		"info":    "/images/weather-templates/bg_info_cinematic.jpg",
-		"warning": "/images/weather-templates/bg_warning_cinematic.jpg",
-		"danger":  "/images/weather-templates/bg_danger_cinematic.jpg",
+		"info":    fmt.Sprintf("%s/bg_info_cinematic.jpg", baseURL),
+		"warning": fmt.Sprintf("%s/bg_warning_cinematic.jpg", baseURL),
+		"danger":  fmt.Sprintf("%s/bg_danger_cinematic.jpg", baseURL),
 	}
 	if r.db == nil {
 		return result, nil

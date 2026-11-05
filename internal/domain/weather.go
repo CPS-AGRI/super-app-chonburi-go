@@ -203,6 +203,40 @@ func (WeatherStationMetadata) TableName() string {
 	return "weather_station_metadata"
 }
 
+// UserWeatherSubscription represents a citizen's weather alert subscription area
+type UserWeatherSubscription struct {
+	ID          string    `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"id"`
+	UserID      string    `gorm:"type:uuid;not null;index:idx_uws_user_id" json:"user_id"`
+	District    string    `gorm:"type:text;not null" json:"district"`
+	Subdistrict string    `gorm:"type:text;not null" json:"subdistrict"`
+	IsPrimary   bool      `gorm:"type:boolean;not null;default:false" json:"is_primary"`
+	IsActive    bool      `gorm:"type:boolean;not null;default:true" json:"is_active"`
+	CreatedAt   time.Time `gorm:"type:timestamptz;not null;default:now()" json:"created_at"`
+	UpdatedAt   time.Time `gorm:"type:timestamptz;not null;default:now()" json:"updated_at"`
+}
+
+func (UserWeatherSubscription) TableName() string {
+	return "user_weather_subscriptions"
+}
+
+// WeatherAlertHistory represents an issued weather alert entry for notification feed
+type WeatherAlertHistory struct {
+	ID          string    `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"id"`
+	Subdistrict string    `gorm:"type:varchar(100);not null;index:idx_wah_subdistrict" json:"subdistrict"`
+	District    string    `gorm:"type:varchar(100);not null" json:"district"`
+	Title       string    `gorm:"type:varchar(255);not null" json:"title"`
+	Message     string    `gorm:"type:text;not null" json:"message"`
+	Severity    string    `gorm:"type:varchar(20);not null;default:'info'" json:"severity"`
+	AlertType   string    `gorm:"type:varchar(50);not null;default:'general'" json:"alert_type"`
+	ImageURL    string    `gorm:"type:text" json:"image_url"`
+	SentCount   int       `gorm:"type:int;not null;default:0" json:"sent_count"`
+	CreatedAt   time.Time `gorm:"type:timestamptz;not null;default:now();index:idx_wah_created_at_desc,sort:desc" json:"created_at"`
+}
+
+func (WeatherAlertHistory) TableName() string {
+	return "weather_alert_history"
+}
+
 // TelemetryHistoryRecord represents a historical IoT sensor telemetry record from TimescaleDB
 type TelemetryHistoryRecord struct {
 	Time           string  `json:"time"`

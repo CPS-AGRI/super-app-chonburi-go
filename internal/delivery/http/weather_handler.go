@@ -52,6 +52,9 @@ func (h *WeatherHandler) RegisterRoutes(router fiber.Router) {
 	// Station Metadata & Custom Aliases
 	group.Get("/stations/:serial/metadata", h.GetStationMetadata)
 	group.Put("/stations/:serial/metadata", h.UpdateStationMetadata)
+
+	// Test Alert Dispatch for Subdistricts
+	group.Post("/test-alert", h.SendTestAlert)
 }
 
 func (h *WeatherHandler) GetStations(c fiber.Ctx) error {
@@ -365,5 +368,51 @@ func (h *WeatherHandler) UpdateStationMetadata(c fiber.Ctx) error {
 		"success": true,
 		"data":    req,
 		"message": "Station metadata updated successfully",
+	})
+}
+
+// SendTestAlert handles manual/test weather alerts for citizen subscribers of a subdistrict.
+func (h *WeatherHandler) SendTestAlert(c fiber.Ctx) error {
+	ctx := c.Context()
+	var req struct {
+		Subdistrict string `json:"subdistrict"`
+		District    string `json:"district"`
+		Severity    string `json:"severity"` // "info", "warning", "danger"
+		ImageURL    string `json:"image_url"`
+	}
+
+	if err := c.Bind().Body(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Invalid request body",
+		})
+	}
+
+	if req.Subdistrict == "" {
+		req.Subdistrict = "อ่างศิลา"
+	}
+	if req.District == "" {
+		req.District = "เมืองชลบุรี"
+	}
+	if req.Severity == "" {
+		req.Severity = "info"
+	}
+
+	count, err := h.useCase.DispatchTestAlert(ctx, req.Subdistrict, req.District, req.Severity, req.ImageURL)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"success": false,
+			"error":   err.Error(),
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"success":     true,
+		"subdistrict": req.Subdistrict,
+		"district":    req.District,
+		"severity":    req.Severity,
+		"image_url":   req.ImageURL,
+		"sent_to":     count,
+		"message":     "ส่งข้อความแจ้งเตือนทดสอบสำเร็จ",
 	})
 }

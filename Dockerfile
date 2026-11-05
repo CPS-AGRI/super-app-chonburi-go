@@ -1,5 +1,5 @@
 # Stage 1: Build binary
-FROM golang:1.25-alpine AS builder
+FROM golang:alpine AS builder
 
 WORKDIR /app
 
@@ -15,7 +15,7 @@ RUN go mod download
 COPY . .
 
 # Build statically linked binary
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o main cmd/server/main.go
+RUN go mod tidy && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o main cmd/server/main.go
 
 # Stage 2: Create minimal final image
 FROM alpine:3.21
@@ -25,8 +25,9 @@ WORKDIR /app
 RUN apk add --no-cache ca-certificates tzdata \
     && addgroup -S appgroup && adduser -S appuser -G appgroup
 
-# Copy compiled binary
+# Copy compiled binary and credentials
 COPY --from=builder /app/main .
+COPY --from=builder /app/firebase-service-account.json* ./
 
 # Set permissions
 RUN chown -R appuser:appgroup /app
