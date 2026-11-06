@@ -44,3 +44,4 @@ super-app-chonburi-*-firebase-adminsdk-*.json
 
 env
 server
+*.log

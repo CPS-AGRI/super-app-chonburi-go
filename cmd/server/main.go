@@ -154,7 +154,7 @@ func main() {
 	weatherAccountHandler := delivery.NewWeatherAccountHandler(weatherAccountUC)
 
 	// Water Level Module (Consolidated from IoT Core Gateway / River Microservice)
-	waterLevelRepo := repository.NewWaterLevelRepository(cfg, redis.Client)
+	waterLevelRepo := repository.NewWaterLevelRepository(cfg, redis.Client, database.DB)
 	waterLevelUC := usecase.NewWaterLevelUseCase(waterLevelRepo)
 	waterLevelHandler := delivery.NewWaterLevelHandler(waterLevelUC)
 

@@ -18,7 +18,10 @@ import (
 	"github.com/gofiber/fiber/v3"
 )
 
-// M2MOrJWT authenticates request via Either JWT Bearer (Web Admin) OR HMAC-SHA256 M2M signature (Pattaya Dashboard)
+// M2MOrJWT authenticates request via:
+// 1. JWT Bearer token / Cookie (Chonburi Web Admin)
+// 2. Internal Microservice Secret header: X-Internal-Secret (Alert Service, etc.)
+// 3. HMAC-SHA256 M2M signature (Pattaya Dashboard / External Consumers)
 func M2MOrJWT(cfg *config.Config) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		// 1. Try JWT Bearer / Cookie first (Chonburi Web Admin)
@@ -40,13 +43,31 @@ func M2MOrJWT(cfg *config.Config) fiber.Handler {
 			}
 		}
 
-		// 2. Verify M2M HMAC Signature (Pattaya Dashboard / External Consumers)
-		if err := verifyM2M(c, cfg); err == nil {
-			c.Locals("auth_type", "m2m")
+		// 2. Try Internal Microservice Secret (chon-alert-notification, internal workers)
+		internalSecret := c.Get("X-Internal-Secret")
+		if internalSecret != "" && cfg.M2MSecretKey != "" && internalSecret == cfg.M2MSecretKey {
+			c.Locals("auth_type", "internal_service")
 			return c.Next()
-		} else {
-			return err
 		}
+
+		// 3. Verify M2M HMAC Signature (Pattaya Dashboard / External Consumers)
+		m2mKey := c.Get("X-M2M-Key")
+		if m2mKey != "" {
+			if err := verifyM2M(c, cfg); err == nil {
+				c.Locals("auth_type", "m2m")
+				return c.Next()
+			} else {
+				return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+					"success": false,
+					"error":   err.Error(),
+				})
+			}
+		}
+
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"success": false,
+			"error":   "Unauthorized: Invalid or missing authentication credentials (JWT Bearer, X-Internal-Secret, or M2M HMAC signature required)",
+		})
 	}
 }
 
@@ -57,34 +78,22 @@ func verifyM2M(c fiber.Ctx, cfg *config.Config) error {
 	signature := c.Get("X-Signature")
 
 	if m2mKey == "" || tsHeader == "" || nonce == "" || signature == "" {
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-			"success": false,
-			"error":   "Unauthorized: Missing required M2M security headers (X-M2M-Key, X-Timestamp, X-Nonce, X-Signature)",
-		})
+		return fmt.Errorf("Missing required M2M security headers (X-M2M-Key, X-Timestamp, X-Nonce, X-Signature)")
 	}
 
 	secretKey := cfg.M2MSecretKey
 	if secretKey == "" {
-		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
-			"success": false,
-			"error":   "Server Error: M2M authentication key not configured",
-		})
+		return fmt.Errorf("Server Error: M2M authentication key not configured")
 	}
 
 	// 1. Timestamp freshness check (Replay Attack Prevention - window ±300s)
 	ts, err := strconv.ParseInt(tsHeader, 10, 64)
 	if err != nil {
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-			"success": false,
-			"error":   "Unauthorized: Invalid X-Timestamp format",
-		})
+		return fmt.Errorf("Invalid X-Timestamp format")
 	}
 	now := time.Now().Unix()
 	if math.Abs(float64(now-ts)) > 300 {
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-			"success": false,
-			"error":   "Unauthorized: Request expired or timestamp skew too large (> 5m)",
-		})
+		return fmt.Errorf("Request expired or timestamp skew too large (> 5m)")
 	}
 
 	// 2. Construct Canonical String
@@ -106,10 +115,7 @@ func verifyM2M(c fiber.Ctx, cfg *config.Config) error {
 	expectedSig := hex.EncodeToString(mac.Sum(nil))
 
 	if !hmac.Equal([]byte(strings.ToLower(signature)), []byte(strings.ToLower(expectedSig))) {
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-			"success": false,
-			"error":   "Unauthorized: Invalid M2M signature",
-		})
+		return fmt.Errorf("Invalid M2M signature")
 	}
 
 	// 4. Nonce single-use check (Prevent replay attacks within freshness window)
@@ -118,16 +124,10 @@ func verifyM2M(c fiber.Ctx, cfg *config.Config) error {
 		nonceKey := fmt.Sprintf("m2m:nonce:%s:%s", m2mKey, nonce)
 		set, err := redis.Client.SetNX(c.Context(), nonceKey, "1", 300*time.Second).Result()
 		if err != nil {
-			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
-				"success": false,
-				"error":   "Service Unavailable: Security nonce store unreachable",
-			})
+			return fmt.Errorf("Service Unavailable: Security nonce store unreachable")
 		}
 		if !set {
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-				"success": false,
-				"error":   "Unauthorized: Replay nonce detected",
-			})
+			return fmt.Errorf("Replay nonce detected")
 		}
 	}
 

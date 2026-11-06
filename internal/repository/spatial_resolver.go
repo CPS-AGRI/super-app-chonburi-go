@@ -71,6 +71,11 @@ func (s *spatialResolver) Resolve(lat, lon float64) (subdistrict, district strin
 	return best.Subdistrict, best.District
 }
 
+// ResolveSubdistrict exposes Resolve globally across repositories and use cases
+func ResolveSubdistrict(lat, lon float64) (string, string) {
+	return globalSpatialResolver.Resolve(lat, lon)
+}
+
 // haversineKm calculates the great-circle distance in kilometres between two geographic coordinates.
 // Uses Earth radius = 6371 km (WGS-84 mean).
 func haversineKm(lat1, lon1, lat2, lon2 float64) float64 {

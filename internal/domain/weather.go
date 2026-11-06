@@ -150,6 +150,7 @@ type WeatherQueryFilter struct {
 // WeatherAlertSetting represents real persisted alert rules in PostgreSQL
 type WeatherAlertSetting struct {
 	ID              string    `gorm:"primaryKey;column:id" json:"id"`
+	ModuleKey       string    `gorm:"column:module_key;default:'weather'" json:"module_key"`
 	Name            string    `gorm:"column:name;not null" json:"name"`
 	Parameter       string    `gorm:"column:parameter;not null" json:"parameter"` // pm25, rain_hourly, rain_daily, etc.
 	Condition       string    `gorm:"column:condition;not null" json:"condition"` // greater_than, less_than
