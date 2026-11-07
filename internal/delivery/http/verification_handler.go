@@ -2,6 +2,7 @@ package http
 
 import (
 	"strconv"
+	"strings"
 	"super-app-chonburi-go/internal/domain"
 	"super-app-chonburi-go/pkg/jwtutil"
 
@@ -21,6 +22,7 @@ func (h *VerificationHandler) RegisterRoutes(router fiber.Router) {
 	group := router.Group("/verifications", jwtutil.RequireAuth())
 	group.Get("/", h.GetVerifications)
 	group.Get("/:id", h.GetVerificationByID)
+	group.Post("/:id/unmask-id", h.UnmaskCitizenID)
 	group.Post("/approve", h.Approve)
 	group.Post("/reject", h.Reject)
 }
@@ -84,6 +86,41 @@ func (h *VerificationHandler) GetVerificationByID(c fiber.Ctx) error {
 	}
 
 	return c.JSON(item)
+}
+
+func (h *VerificationHandler) UnmaskCitizenID(c fiber.Ctx) error {
+	userClaims, ok := c.Locals("user").(*jwtutil.CustomClaims)
+	if !ok || userClaims == nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error": "unauthorized",
+		})
+	}
+
+	idStr := c.Params("id")
+	userID, err := uuid.Parse(idStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "invalid user id format",
+		})
+	}
+
+	traceID := c.Get("X-Request-ID")
+	fullID, err := h.useCase.UnmaskCitizenID(userID, userClaims.ID, userClaims.Role, c.IP(), c.Get("User-Agent"), traceID)
+	if err != nil {
+		if strings.Contains(err.Error(), "FORBIDDEN") {
+			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+				"error": err.Error(),
+			})
+		}
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"user_id":         userID,
+		"identity_number": fullID,
+	})
 }
 
 func (h *VerificationHandler) Approve(c fiber.Ctx) error {

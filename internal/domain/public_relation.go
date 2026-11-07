@@ -188,6 +188,7 @@ type PaginatedNotificationResponse struct {
 type PublicRelationDashboardStats struct {
 	ActiveNewsCount        int64 `json:"active_news_count"`
 	AverageViewers         int64 `json:"average_viewers"`
+	TotalViewsCount        int64 `json:"total_views_count"`
 	TotalNewsCount         int64 `json:"total_news_count"`
 	TotalNotificationCount int64 `json:"total_notification_count"`
 	TotalLikesCount        int64 `json:"total_likes_count"`

@@ -36,6 +36,8 @@ func (h *DashboardHandler) GetBackOffice(c fiber.Ctx) error {
 	if startDateStr != "" {
 		if t, err := time.Parse(time.RFC3339, startDateStr); err == nil {
 			filter.StartDate = &t
+		} else if t, err := time.Parse("2006-01-02", startDateStr); err == nil {
+			filter.StartDate = &t
 		}
 	}
 
@@ -43,6 +45,9 @@ func (h *DashboardHandler) GetBackOffice(c fiber.Ctx) error {
 	if endDateStr != "" {
 		if t, err := time.Parse(time.RFC3339, endDateStr); err == nil {
 			filter.EndDate = &t
+		} else if t, err := time.Parse("2006-01-02", endDateStr); err == nil {
+			endDay := t.Add(23*time.Hour + 59*time.Minute + 59*time.Second)
+			filter.EndDate = &endDay
 		}
 	}
 

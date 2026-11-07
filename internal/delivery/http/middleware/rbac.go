@@ -11,8 +11,12 @@ import (
 // DenyExecutivesMutation blocks Executives role from POST, PUT, PATCH, DELETE operations on operational endpoints
 func DenyExecutivesMutation() fiber.Handler {
 	return func(c fiber.Ctx) error {
-		// Allow auth actions and KPI threshold configuration
-		if strings.HasPrefix(c.Path(), "/api/v1/auth") || strings.HasPrefix(c.Path(), "/api/v1/kpi/thresholds") {
+		// Allow auth actions, KPI threshold configuration, telemetry/view logs, and live stream handshakes
+		if strings.HasPrefix(c.Path(), "/api/v1/auth") ||
+			strings.HasPrefix(c.Path(), "/api/v1/kpi/thresholds") ||
+			strings.HasPrefix(c.Path(), "/api/v1/cctv/logs") ||
+			strings.Contains(c.Path(), "/stream") ||
+			strings.Contains(c.Path(), "/webrtc-offer") {
 			return c.Next()
 		}
 

@@ -1,7 +1,10 @@
 package repository
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
+	"strings"
 	"super-app-chonburi-go/internal/domain"
 	"super-app-chonburi-go/pkg/crypto"
 	"time"
@@ -9,6 +12,32 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
+
+func FormatAndMaskCitizenID(id string) string {
+	digits := ""
+	for _, ch := range id {
+		if ch >= '0' && ch <= '9' {
+			digits += string(ch)
+		}
+	}
+	if len(digits) != 13 {
+		return id
+	}
+	return fmt.Sprintf("%s-%s-••••••-%s-%s", digits[0:1], digits[1:5], digits[10:12], digits[12:13])
+}
+
+func FormatFullCitizenID(id string) string {
+	digits := ""
+	for _, ch := range id {
+		if ch >= '0' && ch <= '9' {
+			digits += string(ch)
+		}
+	}
+	if len(digits) != 13 {
+		return id
+	}
+	return fmt.Sprintf("%s-%s-%s-%s-%s", digits[0:1], digits[1:5], digits[5:10], digits[10:12], digits[12:13])
+}
 
 type verificationRepository struct {
 	db *gorm.DB
@@ -49,6 +78,9 @@ func (r *verificationRepository) GetPaginated(query domain.VerificationQuery) (*
 	for i, info := range infos {
 		idNum := crypto.DecryptPID(info.IdentityNumberEncrypted)
 		laser := crypto.DecryptPID(info.LaserIdEncrypted)
+		maskedID := FormatAndMaskCitizenID(idNum)
+
+		cardAddr, resAddr, popType := r.resolveAddressAndPopulation(&info)
 
 		items[i] = domain.UserVerificationItem{
 			UserID:                    info.UserId,
@@ -57,7 +89,7 @@ func (r *verificationRepository) GetPaginated(query domain.VerificationQuery) (*
 			LastName:                  info.LastName,
 			Phone:                     info.Phone,
 			Email:                     info.Email,
-			IdentityNumber:            idNum,
+			IdentityNumber:            maskedID,
 			LaserID:                   laser,
 			IdCardType:                info.IdCardType,
 			IdCardPhotoUrl:            info.IdCardPhotoUrl,
@@ -81,6 +113,11 @@ func (r *verificationRepository) GetPaginated(query domain.VerificationQuery) (*
 			IsWasteFeeReceipt:         info.IsWasteFeeReceipt,
 			IsOnlineTaxPaymentFile:    info.IsOnlineTaxPaymentFile,
 			IsOnlineTaxPaymentReceipt: info.IsOnlineTaxPaymentReceipt,
+			CardAddress:               cardAddr,
+			ResidentialAddress:        resAddr,
+			PopulationType:            popType,
+			VerifiedByType:            func() string { if info.VerifiedByType != "" { return info.VerifiedByType }; return "admin" }(),
+			IsMasked:                  true,
 		}
 	}
 
@@ -97,6 +134,77 @@ func (r *verificationRepository) GetPaginated(query domain.VerificationQuery) (*
 	}, nil
 }
 
+func (r *verificationRepository) resolveAddressAndPopulation(info *domain.UserInformation) (string, string, string) {
+	// 1. Build residential address from user_informations
+	resParts := []string{}
+	if info.HouseNumber != "" {
+		resParts = append(resParts, "บ้านเลขที่ "+info.HouseNumber)
+	}
+	if info.VillageNumber != "" {
+		resParts = append(resParts, "หมู่ "+info.VillageNumber)
+	}
+	if info.Alley != "" {
+		resParts = append(resParts, "ซอย "+info.Alley)
+	}
+	if info.Road != "" {
+		resParts = append(resParts, "ถนน "+info.Road)
+	}
+	if info.Subdistrict != "" {
+		resParts = append(resParts, "ต./แขวง "+info.Subdistrict)
+	}
+	if info.District != "" {
+		resParts = append(resParts, "อ./เขต "+info.District)
+	}
+	if info.Province != "" {
+		resParts = append(resParts, "จ."+info.Province)
+	}
+	if info.PostalCode > 0 {
+		resParts = append(resParts, fmt.Sprintf("%d", info.PostalCode))
+	}
+	residentialAddress := strings.Join(resParts, " ")
+	if residentialAddress == "" {
+		residentialAddress = "ไม่ระบุที่อยู่อาศัยปัจจุบัน"
+	}
+
+	// 2. Query Card/Registered address from user_oauth_accounts (ThaID)
+	var oauthAcc domain.UserOauthAccount
+	var cardAddress string
+	if err := r.db.Where("user_id = ? AND provider ILIKE ?", info.UserId, "%thaiid%").First(&oauthAcc).Error; err == nil {
+		if oauthAcc.RawData != "" {
+			var rawMap map[string]interface{}
+			if json.Unmarshal([]byte(oauthAcc.RawData), &rawMap) == nil {
+				if addrObj, ok := rawMap["address"].(map[string]interface{}); ok {
+					if formatted, ok := addrObj["formatted"].(string); ok && formatted != "" {
+						cardAddress = formatted
+					}
+				} else if addrStr, ok := rawMap["address"].(string); ok && addrStr != "" {
+					cardAddress = addrStr
+				}
+			}
+		}
+	}
+
+	if cardAddress == "" {
+		cardAddress = residentialAddress
+	}
+
+	// 3. Population classification:
+	// - บัตร/ทะเบียนบ้านอยู่ชลบุรี -> ประชากรจริง
+	// - บัตรเป็นที่อื่น แต่ที่อยู่อาศัยเป็นชลบุรี -> ประชากรแฝง
+	// - อื่นๆ -> ประชากรนอกพื้นที่
+	isCardChonburi := strings.Contains(cardAddress, "ชลบุรี")
+	isResChonburi := strings.Contains(info.Province, "ชลบุรี") || strings.Contains(residentialAddress, "ชลบุรี")
+
+	populationType := "outside"
+	if isCardChonburi {
+		populationType = "real"
+	} else if isResChonburi {
+		populationType = "latent"
+	}
+
+	return cardAddress, residentialAddress, populationType
+}
+
 func (r *verificationRepository) GetByID(userID uuid.UUID) (*domain.UserVerificationItem, error) {
 	var info domain.UserInformation
 	err := r.db.Where("user_id = ?", userID).First(&info).Error
@@ -109,6 +217,9 @@ func (r *verificationRepository) GetByID(userID uuid.UUID) (*domain.UserVerifica
 
 	idNum := crypto.DecryptPID(info.IdentityNumberEncrypted)
 	laser := crypto.DecryptPID(info.LaserIdEncrypted)
+	maskedID := FormatAndMaskCitizenID(idNum)
+
+	cardAddr, resAddr, popType := r.resolveAddressAndPopulation(&info)
 
 	return &domain.UserVerificationItem{
 		UserID:                    info.UserId,
@@ -117,7 +228,7 @@ func (r *verificationRepository) GetByID(userID uuid.UUID) (*domain.UserVerifica
 		LastName:                  info.LastName,
 		Phone:                     info.Phone,
 		Email:                     info.Email,
-		IdentityNumber:            idNum,
+		IdentityNumber:            maskedID,
 		LaserID:                   laser,
 		IdCardType:                info.IdCardType,
 		IdCardPhotoUrl:            info.IdCardPhotoUrl,
@@ -141,7 +252,22 @@ func (r *verificationRepository) GetByID(userID uuid.UUID) (*domain.UserVerifica
 		IsWasteFeeReceipt:         info.IsWasteFeeReceipt,
 		IsOnlineTaxPaymentFile:    info.IsOnlineTaxPaymentFile,
 		IsOnlineTaxPaymentReceipt: info.IsOnlineTaxPaymentReceipt,
+		CardAddress:               cardAddr,
+		ResidentialAddress:        resAddr,
+		PopulationType:            popType,
+		VerifiedByType:            func() string { if info.VerifiedByType != "" { return info.VerifiedByType }; return "admin" }(),
+		IsMasked:                  true,
 	}, nil
+}
+
+func (r *verificationRepository) GetUnmaskedCitizenID(userID uuid.UUID) (string, error) {
+	var info domain.UserInformation
+	err := r.db.Select("identity_number_encrypted").Where("user_id = ?", userID).First(&info).Error
+	if err != nil {
+		return "", err
+	}
+	idNum := crypto.DecryptPID(info.IdentityNumberEncrypted)
+	return FormatFullCitizenID(idNum), nil
 }
 
 func (r *verificationRepository) Approve(req *domain.ApproveVerificationRequest, adminUserID string) error {
@@ -149,6 +275,7 @@ func (r *verificationRepository) Approve(req *domain.ApproveVerificationRequest,
 	updates := map[string]interface{}{
 		"verification_status":           string(domain.VerificationStatusVerified),
 		"verified_date":                 &now,
+		"verified_by_type":              "admin",
 		"rejection_reason":              nil,
 		"updated_by":                    adminUserID,
 		"updated_date":                  now,

@@ -16,8 +16,8 @@ import (
 )
 
 // DefaultDevKey is used only in development if PID_ENCRYPTION_KEY is unset.
-const DefaultDevKey = "7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a"
-const DefaultDevHmacSecret = "chonburi_pid_hmac_default_secret_key_2026"
+const DefaultDevKey = "47cee15abee2b1c4ace988d4b409ed58703209c42c36f3171ec17cbaa6ca167b"
+const DefaultDevHmacSecret = "edfe1cd90e5e480296f7a95ac02ee81948ca03dbb33282820de5563e2f1956fa"
 
 // PIDCipher provides high-performance, thread-safe AES-256-GCM encryption/decryption
 // and HMAC-SHA256 blind indexing for Thai Citizen IDs and sensitive identity fields.

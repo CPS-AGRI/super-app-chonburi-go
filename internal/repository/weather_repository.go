@@ -471,6 +471,23 @@ func (r *weatherRepository) FetchAllSensors(ctx context.Context) ([]domain.Weath
 			sensors = append(sensors, s)
 		}
 
+		// Ensure PostgreSQL weather_station_metadata has all active stations
+		if r.db != nil && len(sensorMap) > 0 {
+			go func(items []domain.WeatherSensor) {
+				for _, sItem := range items {
+					meta := domain.WeatherStationMetadata{
+						Serial:      sItem.Serial,
+						PoleCode:    sItem.PoleCode,
+						CustomName:  sItem.Name,
+						Subdistrict: sItem.Subdistrict,
+						District:    sItem.District,
+						AdminZone:   sItem.AdminZone,
+					}
+					_ = r.db.Where("serial = ?", sItem.Serial).FirstOrCreate(&meta).Error
+				}
+			}(sensors)
+		}
+
 		// Update L1 Cache
 		r.l1Mu.Lock()
 		r.l1Cache = sensors

@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"bytes"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"log"
@@ -233,10 +234,84 @@ func CheckCameraStatus(streamURL string) string {
 		return "ONLINE"
 	}
 
-	// 2. HTTP / HTTPS Stream (HLS .m3u8, direct video, web stream, YouTube)
+	// 2. WebRTC Stream (WebRTC gateways like go2rtc, MediaMTX, WHEP, or user links)
+	isWebRTC := strings.Contains(strings.ToLower(streamURL), "/webrtc") ||
+		strings.Contains(strings.ToLower(streamURL), "/whep") ||
+		strings.HasPrefix(strings.ToLower(streamURL), "webrtc://")
+
+	if isWebRTC {
+		// If protocol is webrtc://, check TCP connection to the host
+		if strings.HasPrefix(strings.ToLower(streamURL), "webrtc://") {
+			u, err := url.Parse(streamURL)
+			if err == nil {
+				host := u.Host
+				if !strings.Contains(host, ":") {
+					host = host + ":8554"
+				}
+				conn, err := net.DialTimeout("tcp", host, 3*time.Second)
+				if err == nil {
+					_ = conn.Close()
+					return "ONLINE"
+				}
+			}
+			return "OFFLINE"
+		}
+
+		client := &http.Client{
+			Timeout: 4 * time.Second,
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+			},
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				if len(via) >= 5 {
+					return errors.New("stopped after 5 redirects")
+				}
+				return nil
+			},
+		}
+
+		// Standard WebRTC HTTP/HTTPS check (without Range header)
+		reqGet, err := http.NewRequest("GET", streamURL, nil)
+		if err == nil {
+			reqGet.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) CCTV-HealthCheck/1.0")
+			reqGet.Header.Set("Accept", "*/*")
+			resp, err := client.Do(reqGet)
+			if err == nil {
+				_ = resp.Body.Close()
+				// WebRTC endpoints often return 200 (Player page), 204 (WHEP ready), 201 (Created), or 405 (Method Not Allowed)
+				if resp.StatusCode < 400 || resp.StatusCode == 405 {
+					return "ONLINE"
+				}
+			}
+		}
+
+		// Direct TCP probe fallback to the port
+		if u, err := url.Parse(streamURL); err == nil {
+			host := u.Host
+			if !strings.Contains(host, ":") {
+				if u.Scheme == "https" {
+					host = host + ":443"
+				} else {
+					host = host + ":80"
+				}
+			}
+			conn, err := net.DialTimeout("tcp", host, 3*time.Second)
+			if err == nil {
+				_ = conn.Close()
+				return "ONLINE"
+			}
+		}
+
+		return "OFFLINE"
+	}
+
+	// 3. HTTP / HTTPS Stream (HLS .m3u8, direct video, web stream, YouTube)
 	if strings.HasPrefix(strings.ToLower(streamURL), "http://") || strings.HasPrefix(strings.ToLower(streamURL), "https://") {
 		client := &http.Client{
 			Timeout: 4 * time.Second,
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+			},
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {
 				if len(via) >= 5 {
 					return errors.New("stopped after 5 redirects")

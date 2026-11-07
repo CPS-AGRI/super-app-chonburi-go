@@ -125,7 +125,7 @@ func main() {
 	dashboardUC := usecase.NewDashboardUseCase(dashboardRepo)
 	taxNewUC := usecase.NewTaxNewUseCase(taxNewRepo, emailSender, "")
 	publicRelationUC := usecase.NewPublicRelationUseCase(publicRelationRepo, adminRepo, storageProvider, database.DB, kpiLogger)
-	verificationUC := usecase.NewVerificationUseCase(verificationRepo)
+	verificationUC := usecase.NewVerificationUseCase(verificationRepo, auditRepo)
 	cctvUC := usecase.NewCCTVUseCase(cctvRepo)
 	weatherAccountRepo := repository.NewWeatherAccountRepository(database.DB)
 	weatherAccountUC := usecase.NewWeatherAccountUseCase(weatherAccountRepo)

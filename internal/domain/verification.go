@@ -53,6 +53,17 @@ type UserVerificationItem struct {
 	IsWasteFeeReceipt         bool       `json:"is_waste_fee_receipt"`
 	IsOnlineTaxPaymentFile    bool       `json:"is_online_tax_payment_file"`
 	IsOnlineTaxPaymentReceipt bool       `json:"is_online_tax_payment_receipt"`
+
+	CardAddress        string `json:"card_address"`
+	ResidentialAddress string `json:"residential_address"`
+	PopulationType     string `json:"population_type"` // "real" = ประชากรจริง, "latent" = ประชากรแฝง, "outside" = นอกพื้นที่
+	VerifiedByType     string `json:"verified_by_type"` // "system" = ระบบ ThaID อนุมัติ, "admin" = เจ้าหน้าที่อนุมัติ
+	IsMasked           bool   `json:"is_masked"`
+}
+
+type UnmaskCitizenIDResponse struct {
+	UserID         uuid.UUID `json:"user_id"`
+	IdentityNumber string    `json:"identity_number"`
 }
 
 type PaginatedVerificationResponse struct {
@@ -95,6 +106,7 @@ type RejectVerificationRequest struct {
 type AdminVerificationRepository interface {
 	GetPaginated(query VerificationQuery) (*PaginatedVerificationResponse, error)
 	GetByID(userID uuid.UUID) (*UserVerificationItem, error)
+	GetUnmaskedCitizenID(userID uuid.UUID) (string, error)
 	Approve(req *ApproveVerificationRequest, adminUserID string) error
 	Reject(userID uuid.UUID, reason string, adminUserID string) error
 	GetFCMTokens(userID uuid.UUID) ([]string, error)
@@ -105,6 +117,7 @@ type AdminVerificationRepository interface {
 type AdminVerificationUseCase interface {
 	GetVerifications(query VerificationQuery) (*PaginatedVerificationResponse, error)
 	GetVerificationByID(userID uuid.UUID) (*UserVerificationItem, error)
+	UnmaskCitizenID(userID uuid.UUID, adminID string, role string, ip string, userAgent string, traceID string) (string, error)
 	ApproveVerification(req *ApproveVerificationRequest, adminUserID string) error
 	RejectVerification(userID uuid.UUID, reason string, adminUserID string) error
 }

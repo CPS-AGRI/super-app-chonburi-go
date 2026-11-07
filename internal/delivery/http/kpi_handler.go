@@ -52,6 +52,22 @@ func parseKPIFilter(c fiber.Ctx) domain.KPIQueryFilter {
 		}
 	}
 
+	// Strict Role-Based Access Scoping:
+	// - ผู้บริหาร (Executives / SuperAdmin): ข้อมูลทั้งระบบ (Global Province-wide)
+	// - หัวหน้า (Supervisors / Managers): เห็นทั้งโมดูลของสังกัดตนเอง (Module & Department)
+	// - พนักงาน (Employees / Staff): เห็นเฉพาะงาน/เคสที่ตนเองต้องจัดการและรับผิดชอบ (Self-assigned & updated)
+	if claims, ok := c.Locals("user").(*jwtutil.CustomClaims); ok && claims != nil {
+		role := strings.ToLower(claims.Role)
+		isExecutive := role == "executives" || role == "executive" || role == "superadmin" || role == "super_admin"
+		isSupervisor := role == "supervisor" || role == "manager" || strings.Contains(role, "หัวหน้า")
+		isEmployee := role == "employee" || role == "employees" || role == "staff" || strings.Contains(role, "พนักงาน")
+
+		if isEmployee && !isExecutive && !isSupervisor {
+			// Employee is strictly locked to their own ID
+			filter.UserID = claims.ID
+		}
+	}
+
 	startDateStr := c.Query("start_date")
 	if startDateStr != "" {
 		if t, err := time.Parse("2006-01-02", startDateStr); err == nil {
