@@ -5,6 +5,7 @@ import (
 	"context"
 	"io"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"super-app-chonburi-go/pkg/storage/minio"
@@ -51,7 +52,21 @@ func (s *minioStorage) Upload(file io.Reader, filename string) (string, error) {
 }
 
 func (s *minioStorage) Delete(filename string) error {
-	return nil
+	if filename == "" {
+		return nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	cleanKey := strings.TrimSpace(filename)
+	if idx := strings.Index(cleanKey, "/uploads/"); idx != -1 {
+		cleanKey = cleanKey[idx+1:]
+	} else if !strings.HasPrefix(cleanKey, "uploads/") {
+		cleanKey = "uploads/" + filepath.Base(cleanKey)
+	}
+
+	return s.client.RemoveObject(ctx, cleanKey)
 }
 
 func (s *minioStorage) GetURL(filename string) string {

@@ -4,6 +4,8 @@
 *.dll
 *.so
 *.dylib
+build/
+bin/
 
 # Test binary, built with `go test -c`
 *.test
@@ -41,3 +43,5 @@ firebase-service-account.json
 super-app-chonburi-*-firebase-adminsdk-*.json
 
 env
+server
+*.log

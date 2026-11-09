@@ -10,6 +10,7 @@ import (
 	"super-app-chonburi-go/internal/delivery/http/middleware"
 	"super-app-chonburi-go/internal/repository"
 	"super-app-chonburi-go/internal/usecase"
+	"super-app-chonburi-go/pkg/crypto"
 	"super-app-chonburi-go/pkg/database"
 	"super-app-chonburi-go/pkg/mail"
 	"super-app-chonburi-go/pkg/redis"
@@ -27,6 +28,12 @@ import (
 
 func main() {
 	cfg := config.LoadConfig()
+
+	if err := crypto.InitPIDCipher(cfg.PIDEncryptionKey, cfg.PIDHmacSecret); err != nil {
+		log.Printf("⚠️ Warning: Initializing PID Cipher with fallback dev key: %v", err)
+	} else {
+		log.Println("🔒 PDPA High-Security AES-256-GCM PID Cipher Initialized Successfully")
+	}
 
 	database.ConnectDB(cfg)
 	redis.ConnectRedis(cfg)
@@ -118,7 +125,7 @@ func main() {
 	dashboardUC := usecase.NewDashboardUseCase(dashboardRepo)
 	taxNewUC := usecase.NewTaxNewUseCase(taxNewRepo, emailSender, "")
 	publicRelationUC := usecase.NewPublicRelationUseCase(publicRelationRepo, adminRepo, storageProvider, database.DB, kpiLogger)
-	verificationUC := usecase.NewVerificationUseCase(verificationRepo)
+	verificationUC := usecase.NewVerificationUseCase(verificationRepo, auditRepo)
 	cctvUC := usecase.NewCCTVUseCase(cctvRepo)
 	weatherAccountRepo := repository.NewWeatherAccountRepository(database.DB)
 	weatherAccountUC := usecase.NewWeatherAccountUseCase(weatherAccountRepo)
@@ -147,7 +154,7 @@ func main() {
 	weatherAccountHandler := delivery.NewWeatherAccountHandler(weatherAccountUC)
 
 	// Water Level Module (Consolidated from IoT Core Gateway / River Microservice)
-	waterLevelRepo := repository.NewWaterLevelRepository(cfg, redis.Client)
+	waterLevelRepo := repository.NewWaterLevelRepository(cfg, redis.Client, database.DB)
 	waterLevelUC := usecase.NewWaterLevelUseCase(waterLevelRepo)
 	waterLevelHandler := delivery.NewWaterLevelHandler(waterLevelUC)
 

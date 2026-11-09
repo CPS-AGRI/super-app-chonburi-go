@@ -111,6 +111,7 @@ type KPIQueryFilter struct {
 	DepartmentID  string     `json:"department_id"`
 	DepartmentIDs []string   `json:"department_ids"`
 	UserID        string     `json:"user_id"`
+	CameraID      string     `json:"camera_id,omitempty"`
 	StartDate     *time.Time `json:"start_date"`
 	EndDate       *time.Time `json:"end_date"`
 }
@@ -125,6 +126,7 @@ type KPISummaryResponse struct {
 	SLAComplianceRate     float64             `json:"sla_compliance_rate"`
 	TotalSLABreachedCases int64               `json:"total_sla_breached_cases"`
 	AvgCitizenRating      float64             `json:"avg_citizen_rating"`
+	TotalCitizenRatings   int64               `json:"total_citizen_ratings,omitempty"`
 	TotalDisputes         int64               `json:"total_disputes"`
 	Thresholds            *KPIThresholdConfig `json:"thresholds,omitempty"`
 
@@ -143,6 +145,7 @@ type KPISummaryResponse struct {
 	CameraUptimeRate      float64            `json:"camera_uptime_rate,omitempty"`
 	TotalViewSessions     int64              `json:"total_view_sessions,omitempty"`
 	TotalWatchDurationMin int64              `json:"total_watch_duration_min,omitempty"`
+	TotalWatchDurationSec int64              `json:"total_watch_duration_sec,omitempty"`
 	CitizenViewCount      int64              `json:"citizen_view_count,omitempty"`
 	StaffViewCount        int64              `json:"staff_view_count,omitempty"`
 	PublicCameraCount     int64              `json:"public_camera_count,omitempty"`
@@ -156,6 +159,66 @@ type KPISummaryResponse struct {
 	VerificationApprovalRate   float64 `json:"verification_approval_rate,omitempty"`
 	AvgVerificationDurationMin float64 `json:"avg_verification_duration_min,omitempty"`
 	TotalReviewedCases         int64   `json:"total_reviewed_cases,omitempty"`
+
+	RealPopulationCount    int64 `json:"real_population_count,omitempty"`
+	LatentPopulationCount  int64 `json:"latent_population_count,omitempty"`
+	OutsidePopulationCount int64 `json:"outside_population_count,omitempty"`
+	SystemVerifiedCount    int64 `json:"system_verified_count,omitempty"`
+	AdminVerifiedCount     int64 `json:"admin_verified_count,omitempty"`
+
+	// Weather & Disaster KPI Metrics (ModuleKey == weather)
+	TotalWeatherAlerts     int64                       `json:"total_weather_alerts,omitempty"`
+	TotalPushNotifications int64                       `json:"total_push_notifications,omitempty"`
+	TotalSubscribers       int64                       `json:"total_subscribers,omitempty"`
+	ActiveSubscribers      int64                       `json:"active_subscribers,omitempty"`
+	DangerAlertCount       int64                       `json:"danger_alert_count,omitempty"`
+	WarningAlertCount      int64                       `json:"warning_alert_count,omitempty"`
+	InfoAlertCount         int64                       `json:"info_alert_count,omitempty"`
+	FloodRainAlertCount    int64                       `json:"flood_rain_alert_count,omitempty"`
+	PM25AlertCount         int64                       `json:"pm25_alert_count,omitempty"`
+	StormAlertCount        int64                       `json:"storm_alert_count,omitempty"`
+	DailyForecastCount     int64                       `json:"daily_forecast_count,omitempty"`
+	TotalWeatherStations   int64                       `json:"total_weather_stations,omitempty"`
+	OnlineWeatherStations  int64                       `json:"online_weather_stations,omitempty"`
+	OfflineWeatherStations int64                       `json:"offline_weather_stations,omitempty"`
+	StationHealthRate      float64                     `json:"station_health_rate,omitempty"`
+	RecentWeatherAlerts    []KPIWeatherAlertItem       `json:"recent_weather_alerts,omitempty"`
+	DistrictWeatherStats   []KPIDistrictWeatherSummary `json:"district_weather_stats,omitempty"`
+
+	// Flood & Water Level KPI Metrics (ModuleKey == flood)
+	TotalFloodAlerts       int64                       `json:"total_flood_alerts,omitempty"`
+	TotalFloodPushSent     int64                       `json:"total_flood_push_sent,omitempty"`
+	TotalRiverStations     int64                       `json:"total_river_stations,omitempty"`
+	OnlineRiverStations    int64                       `json:"online_river_stations,omitempty"`
+	OfflineRiverStations   int64                       `json:"offline_river_stations,omitempty"`
+	NormalWaterCount       int64                       `json:"normal_water_count,omitempty"`
+	WarningWaterCount      int64                       `json:"warning_water_count,omitempty"`
+	CriticalWaterCount     int64                       `json:"critical_water_count,omitempty"`
+	OverbankWaterCount     int64                       `json:"overbank_water_count,omitempty"`
+	FloodDangerAlertCount  int64                       `json:"flood_danger_alert_count,omitempty"`
+	FloodWarningAlertCount int64                       `json:"flood_warning_alert_count,omitempty"`
+	FloodInfoAlertCount    int64                       `json:"flood_info_alert_count,omitempty"`
+	RecentFloodAlerts      []KPIWeatherAlertItem       `json:"recent_flood_alerts,omitempty"`
+	DistrictFloodStats     []KPIDistrictWeatherSummary `json:"district_flood_stats,omitempty"`
+}
+
+type KPIWeatherAlertItem struct {
+	ID          string    `json:"id"`
+	Title       string    `json:"title"`
+	Body        string    `json:"body"`
+	Severity    string    `json:"severity"`
+	Category    string    `json:"category"`
+	District    string    `json:"district"`
+	Subdistrict string    `json:"subdistrict"`
+	SentCount   int64     `json:"sent_count"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+type KPIDistrictWeatherSummary struct {
+	District     string `json:"district"`
+	StationCount int64  `json:"station_count"`
+	AlertCount   int64  `json:"alert_count"`
+	Subscribers  int64  `json:"subscribers"`
 }
 
 type KPICCTVTopCamera struct {
@@ -166,6 +229,7 @@ type KPICCTVTopCamera struct {
 	AccessLevel      string `json:"access_level"`
 	TotalViews       int64  `json:"total_views"`
 	TotalDurationMin int64  `json:"total_duration_min"`
+	TotalDurationSec int64  `json:"total_duration_sec"`
 }
 
 type KPIStaffLeaderboardItem struct {

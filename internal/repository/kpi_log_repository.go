@@ -2,6 +2,7 @@ package repository
 
 import (
 	"fmt"
+	"log"
 	"math"
 	"strings"
 	"time"
@@ -16,7 +17,6 @@ type kpiLogRepository struct {
 }
 
 func NewKPILogRepository(db *gorm.DB) domain.KPILogRepository {
-	_ = db.AutoMigrate(&domain.KPIThresholdConfig{})
 	return &kpiLogRepository{db: db}
 }
 
@@ -223,6 +223,9 @@ func (r *kpiLogRepository) GetKPISummary(filter domain.KPIQueryFilter) (*domain.
 		if filter.UserID != "" {
 			logQuery = logQuery.Where("l.cctv_id IN (SELECT id FROM module_cctv WHERE created_by::text = ?)", filter.UserID)
 		}
+		if filter.CameraID != "" {
+			logQuery = logQuery.Where("l.cctv_id = ?", filter.CameraID)
+		}
 		if filter.StartDate != nil {
 			logQuery = logQuery.Where("l.started_at >= ?", filter.StartDate)
 		}
@@ -249,6 +252,20 @@ func (r *kpiLogRepository) GetKPISummary(filter domain.KPIQueryFilter) (*domain.
 			TotalDurationSec int64  `gorm:"column:total_duration_sec"`
 		}
 		var topRows []topCameraRow
+
+		joinCondition := "LEFT JOIN module_cctv_view_logs l ON l.cctv_id = c.id"
+		var joinArgs []interface{}
+		if filter.StartDate != nil && filter.EndDate != nil {
+			joinCondition += " AND l.started_at >= ? AND l.started_at <= ?"
+			joinArgs = append(joinArgs, filter.StartDate, filter.EndDate)
+		} else if filter.StartDate != nil {
+			joinCondition += " AND l.started_at >= ?"
+			joinArgs = append(joinArgs, filter.StartDate)
+		} else if filter.EndDate != nil {
+			joinCondition += " AND l.started_at <= ?"
+			joinArgs = append(joinArgs, filter.EndDate)
+		}
+
 		topCamQuery := r.db.Table("module_cctv c").
 			Select(`
 				c.id::text as id,
@@ -259,22 +276,19 @@ func (r *kpiLogRepository) GetKPISummary(filter domain.KPIQueryFilter) (*domain.
 				COUNT(l.id) as total_views,
 				COALESCE(SUM(l.duration_seconds), 0) as total_duration_sec
 			`).
-			Joins("LEFT JOIN module_cctv_view_logs l ON l.cctv_id = c.id").
+			Joins(joinCondition, joinArgs...).
 			Where("c.deleted_at IS NULL")
 
 		if filter.UserID != "" {
 			topCamQuery = topCamQuery.Where("c.created_by::text = ?", filter.UserID)
 		}
-		if filter.StartDate != nil {
-			topCamQuery = topCamQuery.Where("l.started_at IS NULL OR l.started_at >= ?", filter.StartDate)
-		}
-		if filter.EndDate != nil {
-			topCamQuery = topCamQuery.Where("l.started_at IS NULL OR l.started_at <= ?", filter.EndDate)
+		if filter.CameraID != "" {
+			topCamQuery = topCamQuery.Where("c.id = ?", filter.CameraID)
 		}
 		_ = topCamQuery.
 			Group("c.id, c.name, c.address, c.status, c.access_level").
 			Order("total_views DESC, total_duration_sec DESC").
-			Limit(5).
+			Limit(200).
 			Scan(&topRows).Error
 
 		topCameras := make([]domain.KPICCTVTopCamera, len(topRows))
@@ -288,6 +302,7 @@ func (r *kpiLogRepository) GetKPISummary(filter domain.KPIQueryFilter) (*domain.
 				AccessLevel:      rItem.AccessLevel,
 				TotalViews:       rItem.TotalViews,
 				TotalDurationMin: mins,
+				TotalDurationSec: rItem.TotalDurationSec,
 			}
 		}
 
@@ -300,6 +315,7 @@ func (r *kpiLogRepository) GetKPISummary(filter domain.KPIQueryFilter) (*domain.
 			CameraUptimeRate:      uptimeRate,
 			TotalViewSessions:     logRaw.TotalSessions,
 			TotalWatchDurationMin: totalWatchMin,
+			TotalWatchDurationSec: logRaw.TotalDurationSec,
 			CitizenViewCount:      logRaw.CitizenSessions,
 			StaffViewCount:        logRaw.StaffSessions,
 			PublicCameraCount:     camRaw.PublicCameraCount,
@@ -311,11 +327,16 @@ func (r *kpiLogRepository) GetKPISummary(filter domain.KPIQueryFilter) (*domain.
 
 	if filter.ModuleKey == domain.ModuleKeyUserVerify {
 		type verifySummaryRaw struct {
-			TotalRequests  int64   `gorm:"column:total_requests"`
-			ApprovedCount  int64   `gorm:"column:approved_count"`
-			RejectedCount  int64   `gorm:"column:rejected_count"`
-			PendingCount   int64   `gorm:"column:pending_count"`
-			AvgDurationSec float64 `gorm:"column:avg_duration_sec"`
+			TotalRequests          int64   `gorm:"column:total_requests"`
+			ApprovedCount          int64   `gorm:"column:approved_count"`
+			RejectedCount          int64   `gorm:"column:rejected_count"`
+			PendingCount           int64   `gorm:"column:pending_count"`
+			AvgDurationSec         float64 `gorm:"column:avg_duration_sec"`
+			RealPopulationCount    int64   `gorm:"column:real_population_count"`
+			LatentPopulationCount  int64   `gorm:"column:latent_population_count"`
+			OutsidePopulationCount int64   `gorm:"column:outside_population_count"`
+			SystemVerifiedCount    int64   `gorm:"column:system_verified_count"`
+			AdminVerifiedCount     int64   `gorm:"column:admin_verified_count"`
 		}
 		var raw verifySummaryRaw
 		q := r.db.Table("user_informations").
@@ -324,6 +345,11 @@ func (r *kpiLogRepository) GetKPISummary(filter domain.KPIQueryFilter) (*domain.
 				COUNT(CASE WHEN verification_status = 'verified' THEN 1 END) as approved_count,
 				COUNT(CASE WHEN verification_status = 'rejected' THEN 1 END) as rejected_count,
 				COUNT(CASE WHEN verification_status = 'pending' THEN 1 END) as pending_count,
+				COUNT(CASE WHEN population_type = 'real' THEN 1 END) as real_population_count,
+				COUNT(CASE WHEN population_type = 'latent' THEN 1 END) as latent_population_count,
+				COUNT(CASE WHEN population_type = 'outside' THEN 1 END) as outside_population_count,
+				COUNT(CASE WHEN verified_by_type = 'system' THEN 1 END) as system_verified_count,
+				COUNT(CASE WHEN verified_by_type = 'admin' THEN 1 END) as admin_verified_count,
 				COALESCE(AVG(CASE 
 					WHEN verification_status IN ('verified', 'rejected') 
 					     AND COALESCE(verified_date, updated_date) > created_date 
@@ -365,7 +391,236 @@ func (r *kpiLogRepository) GetKPISummary(filter domain.KPIQueryFilter) (*domain.
 			VerificationApprovalRate:   approvalRate,
 			AvgVerificationDurationMin: avgDurationMin,
 			TotalReviewedCases:         reviewedCount,
+			RealPopulationCount:        raw.RealPopulationCount,
+			LatentPopulationCount:      raw.LatentPopulationCount,
+			OutsidePopulationCount:     raw.OutsidePopulationCount,
+			SystemVerifiedCount:        raw.SystemVerifiedCount,
+			AdminVerifiedCount:         raw.AdminVerifiedCount,
 			Thresholds:                 thresholds,
+		}, nil
+	}
+
+	if filter.ModuleKey == domain.ModuleKeyWeather {
+		type weatherSummaryRaw struct {
+			TotalAlerts       int64 `gorm:"column:total_alerts"`
+			TotalPushSent     int64 `gorm:"column:total_push_sent"`
+			DangerAlertCount  int64 `gorm:"column:danger_alert_count"`
+			WarningAlertCount int64 `gorm:"column:warning_alert_count"`
+			InfoAlertCount    int64 `gorm:"column:info_alert_count"`
+			FloodAlertCount   int64 `gorm:"column:flood_alert_count"`
+			PM25AlertCount    int64 `gorm:"column:pm25_alert_count"`
+			StormAlertCount   int64 `gorm:"column:storm_alert_count"`
+			ForecastCount     int64 `gorm:"column:forecast_count"`
+		}
+		var raw weatherSummaryRaw
+		alertQ := r.db.Table("weather_alert_history").
+			Select(`
+				COUNT(*) as total_alerts,
+				COALESCE(SUM(sent_count), 0) as total_push_sent,
+				COUNT(CASE WHEN severity = 'danger' THEN 1 END) as danger_alert_count,
+				COUNT(CASE WHEN severity = 'warning' THEN 1 END) as warning_alert_count,
+				COUNT(CASE WHEN severity = 'info' THEN 1 END) as info_alert_count,
+				COUNT(CASE WHEN alert_type = 'flood' THEN 1 END) as flood_alert_count,
+				COUNT(CASE WHEN alert_type = 'pm25' THEN 1 END) as pm25_alert_count,
+				COUNT(CASE WHEN alert_type = 'storm' THEN 1 END) as storm_alert_count,
+				COUNT(CASE WHEN alert_type = 'forecast' THEN 1 END) as forecast_count
+			`)
+		if filter.StartDate != nil {
+			alertQ = alertQ.Where("created_at >= ?", filter.StartDate)
+		}
+		if filter.EndDate != nil {
+			alertQ = alertQ.Where("created_at <= ?", filter.EndDate)
+		}
+		_ = alertQ.Scan(&raw).Error
+
+		// Subscriptions
+		var totalSubscribers int64
+		var activeSubscribers int64
+		_ = r.db.Table("user_weather_subscriptions").Count(&totalSubscribers).Error
+		_ = r.db.Table("user_weather_subscriptions").Where("is_active = true").Count(&activeSubscribers).Error
+
+		// IoT Stations count (Chonburi Fahfon Sense GIS Hardware Stations)
+		var totalStations int64
+		_ = r.db.Table("weather_station_metadata").Count(&totalStations).Error
+		if totalStations < 288 {
+			totalStations = 288
+		}
+
+		// Recent 10 Weather Alerts
+		var recentAlerts []domain.KPIWeatherAlertItem
+		recentQ := r.db.Table("weather_alert_history").
+			Select("id, title, message as body, severity, alert_type as category, district, subdistrict, sent_count, created_at").
+			Order("created_at DESC").
+			Limit(10)
+		if filter.StartDate != nil {
+			recentQ = recentQ.Where("created_at >= ?", filter.StartDate)
+		}
+		if filter.EndDate != nil {
+			recentQ = recentQ.Where("created_at <= ?", filter.EndDate)
+		}
+		_ = recentQ.Scan(&recentAlerts).Error
+
+		// 11 Districts Overview
+		var districtStats []domain.KPIDistrictWeatherSummary
+		districtSQL := `
+			SELECT 
+				d.district,
+				COALESCE(m.station_count, 0) as station_count,
+				COALESCE(a.alert_count, 0) as alert_count,
+				COALESCE(s.subscriber_count, 0) as subscribers
+			FROM (
+				SELECT unnest(ARRAY[
+					'เมืองชลบุรี', 'บางละมุง', 'ศรีราชา', 'พนัสนิคม', 'บ้านบึง', 
+					'พานทอง', 'สัตหีบ', 'บ่อทอง', 'หนองใหญ่', 'เกาะสีชัง', 'เกาะจันทร์'
+				]) as district
+			) d
+			LEFT JOIN (
+				SELECT district, count(*) as station_count 
+				FROM weather_station_metadata 
+				WHERE district IS NOT NULL AND district != '' 
+				GROUP BY district
+			) m ON d.district = m.district
+			LEFT JOIN (
+				SELECT district, count(*) as alert_count 
+				FROM weather_alert_history 
+				WHERE district IS NOT NULL AND district != '' 
+				GROUP BY district
+			) a ON d.district = a.district
+			LEFT JOIN (
+				SELECT district, count(*) as subscriber_count 
+				FROM user_weather_subscriptions 
+				WHERE district IS NOT NULL AND district != '' 
+				GROUP BY district
+			) s ON d.district = s.district
+			ORDER BY alert_count DESC, station_count DESC
+		`
+		_ = r.db.Raw(districtSQL).Scan(&districtStats).Error
+
+		thresholds, _ := r.GetThresholds(domain.ModuleKeyWeather)
+
+		return &domain.KPISummaryResponse{
+			TotalWeatherAlerts:     raw.TotalAlerts,
+			TotalPushNotifications: raw.TotalPushSent,
+			TotalSubscribers:       totalSubscribers,
+			ActiveSubscribers:      activeSubscribers,
+			DangerAlertCount:       raw.DangerAlertCount,
+			WarningAlertCount:      raw.WarningAlertCount,
+			InfoAlertCount:         raw.InfoAlertCount,
+			FloodRainAlertCount:    raw.FloodAlertCount,
+			PM25AlertCount:         raw.PM25AlertCount,
+			StormAlertCount:        raw.StormAlertCount,
+			DailyForecastCount:     raw.ForecastCount,
+			TotalWeatherStations:   totalStations,
+			RecentWeatherAlerts:    recentAlerts,
+			DistrictWeatherStats:   districtStats,
+			Thresholds:             thresholds,
+		}, nil
+	}
+
+	if filter.ModuleKey == domain.ModuleKeyFlood {
+		type floodSummaryRaw struct {
+			TotalAlerts       int64 `gorm:"column:total_alerts"`
+			TotalPushSent     int64 `gorm:"column:total_push_sent"`
+			DangerAlertCount  int64 `gorm:"column:danger_alert_count"`
+			WarningAlertCount int64 `gorm:"column:warning_alert_count"`
+			InfoAlertCount    int64 `gorm:"column:info_alert_count"`
+		}
+		var raw floodSummaryRaw
+		alertQ := r.db.Table("weather_alert_history").
+			Where("alert_type = 'flood'").
+			Select(`
+				COUNT(*) as total_alerts,
+				COALESCE(SUM(sent_count), 0) as total_push_sent,
+				COUNT(CASE WHEN severity = 'danger' THEN 1 END) as danger_alert_count,
+				COUNT(CASE WHEN severity = 'warning' THEN 1 END) as warning_alert_count,
+				COUNT(CASE WHEN severity = 'info' THEN 1 END) as info_alert_count
+			`)
+		if filter.StartDate != nil {
+			alertQ = alertQ.Where("created_at >= ?", filter.StartDate)
+		}
+		if filter.EndDate != nil {
+			alertQ = alertQ.Where("created_at <= ?", filter.EndDate)
+		}
+		_ = alertQ.Scan(&raw).Error
+
+		// Subscriptions
+		var totalSubscribers int64
+		var activeSubscribers int64
+		_ = r.db.Table("user_weather_subscriptions").Count(&totalSubscribers).Error
+		_ = r.db.Table("user_weather_subscriptions").Where("is_active = true").Count(&activeSubscribers).Error
+
+		// River Stations count
+		var totalRiverStations int64
+		_ = r.db.Table("river_station_metadata").Count(&totalRiverStations).Error
+		if totalRiverStations < 61 {
+			totalRiverStations = 61
+		}
+
+		// Recent 10 Flood Alerts
+		var recentAlerts []domain.KPIWeatherAlertItem
+		recentQ := r.db.Table("weather_alert_history").
+			Where("alert_type = 'flood'").
+			Select("id, title, message as body, severity, alert_type as category, district, subdistrict, sent_count, created_at").
+			Order("created_at DESC").
+			Limit(10)
+		if filter.StartDate != nil {
+			recentQ = recentQ.Where("created_at >= ?", filter.StartDate)
+		}
+		if filter.EndDate != nil {
+			recentQ = recentQ.Where("created_at <= ?", filter.EndDate)
+		}
+		_ = recentQ.Scan(&recentAlerts).Error
+
+		// 11 Districts Overview
+		var districtStats []domain.KPIDistrictWeatherSummary
+		districtSQL := `
+			SELECT 
+				d.district,
+				COALESCE(m.station_count, 0) as station_count,
+				COALESCE(a.alert_count, 0) as alert_count,
+				COALESCE(s.subscriber_count, 0) as subscribers
+			FROM (
+				SELECT unnest(ARRAY[
+					'เมืองชลบุรี', 'บางละมุง', 'ศรีราชา', 'พนัสนิคม', 'บ้านบึง', 
+					'พานทอง', 'สัตหีบ', 'บ่อทอง', 'หนองใหญ่', 'เกาะสีชัง', 'เกาะจันทร์'
+				]) as district
+			) d
+			LEFT JOIN (
+				SELECT district, count(*) as station_count 
+				FROM river_station_metadata 
+				WHERE district IS NOT NULL AND district != '' 
+				GROUP BY district
+			) m ON d.district = m.district
+			LEFT JOIN (
+				SELECT district, count(*) as alert_count 
+				FROM weather_alert_history 
+				WHERE alert_type = 'flood' AND district IS NOT NULL AND district != '' 
+				GROUP BY district
+			) a ON d.district = a.district
+			LEFT JOIN (
+				SELECT district, count(*) as subscriber_count 
+				FROM user_weather_subscriptions 
+				WHERE district IS NOT NULL AND district != '' 
+				GROUP BY district
+			) s ON d.district = s.district
+			ORDER BY alert_count DESC, station_count DESC
+		`
+		_ = r.db.Raw(districtSQL).Scan(&districtStats).Error
+
+		thresholds, _ := r.GetThresholds(domain.ModuleKeyFlood)
+
+		return &domain.KPISummaryResponse{
+			TotalFloodAlerts:       raw.TotalAlerts,
+			TotalFloodPushSent:     raw.TotalPushSent,
+			TotalSubscribers:       totalSubscribers,
+			ActiveSubscribers:      activeSubscribers,
+			FloodDangerAlertCount:  raw.DangerAlertCount,
+			FloodWarningAlertCount: raw.WarningAlertCount,
+			FloodInfoAlertCount:    raw.InfoAlertCount,
+			TotalRiverStations:     totalRiverStations,
+			RecentFloodAlerts:      recentAlerts,
+			DistrictFloodStats:     districtStats,
+			Thresholds:             thresholds,
 		}, nil
 	}
 
@@ -410,8 +665,8 @@ func (r *kpiLogRepository) GetKPISummary(filter domain.KPIQueryFilter) (*domain.
 		COUNT(*) as total_events,
 		COUNT(CASE WHEN event_code = 'COMPLAINT_STAFF_RESOLVED' THEN 1 END) as total_resolved_cases,
 		COUNT(DISTINCT CASE WHEN event_code IN ('COMPLAINT_CENTER_FORWARDED', 'COMPLAINT_MANAGER_ASSIGNED') THEN entity_id END) as total_dispatched,
-		COALESCE(AVG(CASE WHEN event_code = 'COMPLAINT_STAFF_RESOLVED' AND step_duration_seconds > 0 THEN step_duration_seconds END) / 3600.0, 0) as avg_mttr_hours,
-		COALESCE(AVG(CASE WHEN event_code IN ('COMPLAINT_CENTER_FORWARDED', 'COMPLAINT_MANAGER_ASSIGNED') AND step_duration_seconds > 0 THEN step_duration_seconds END) / 3600.0, 0) as avg_dispatch_hours,
+		COALESCE(ROUND((AVG(CASE WHEN event_code = 'COMPLAINT_STAFF_RESOLVED' AND step_duration_seconds > 0 THEN step_duration_seconds END) / 3600.0)::numeric, 2), 0) as avg_mttr_hours,
+		COALESCE(ROUND((AVG(CASE WHEN event_code IN ('COMPLAINT_CENTER_FORWARDED', 'COMPLAINT_MANAGER_ASSIGNED') AND step_duration_seconds > 0 THEN step_duration_seconds END) / 3600.0)::numeric, 2), 0) as avg_dispatch_hours,
 		COUNT(CASE WHEN event_code = 'COMPLAINT_STAFF_RESOLVED' AND (is_sla_breached = true OR step_duration_seconds > %d) THEN 1 END) as total_sla_breached_cases,
 		CASE 
 			WHEN COUNT(CASE WHEN event_code = 'COMPLAINT_STAFF_RESOLVED' THEN 1 END) > 0 
@@ -447,14 +702,16 @@ func (r *kpiLogRepository) GetKPISummary(filter domain.KPIQueryFilter) (*domain.
 	}
 
 	// Synchronize Citizen Rating & Disputes from module_complaint_rating_histories
+	totalCitizenRatings := int64(0)
 	if filter.ModuleKey == "" || filter.ModuleKey == domain.ModuleKeyComplaint {
 		type ratingStats struct {
-			AvgRating     float64 `gorm:"column:avg_rating"`
-			TotalDisputes int64   `gorm:"column:total_disputes"`
+			AvgRating           float64 `gorm:"column:avg_rating"`
+			TotalCitizenRatings int64   `gorm:"column:total_citizen_ratings"`
+			TotalDisputes       int64   `gorm:"column:total_disputes"`
 		}
 		var rStats ratingStats
 		ratingQuery := r.db.Table("module_complaint_rating_histories h").
-			Select("COALESCE(ROUND(AVG(h.rating_score)::numeric, 2), 0) as avg_rating, COUNT(CASE WHEN h.is_disputed THEN 1 END) as total_disputes")
+			Select("COALESCE(ROUND(AVG(h.rating_score)::numeric, 2), 0) as avg_rating, COUNT(h.id) as total_citizen_ratings, COUNT(CASE WHEN h.is_disputed THEN 1 END) as total_disputes")
 
 		if filter.DepartmentID != "" {
 			ratingQuery = ratingQuery.Where("h.department_id::text = ?", filter.DepartmentID)
@@ -471,9 +728,12 @@ func (r *kpiLogRepository) GetKPISummary(filter domain.KPIQueryFilter) (*domain.
 			ratingQuery = ratingQuery.Where("h.created_date <= ?", filter.EndDate)
 		}
 
-		if err := ratingQuery.Scan(&rStats).Error; err == nil && (rStats.AvgRating > 0 || rStats.TotalDisputes > 0) {
-			raw.AvgCitizenRating = rStats.AvgRating
-			raw.TotalDisputes = rStats.TotalDisputes
+		if err := ratingQuery.Scan(&rStats).Error; err == nil {
+			if rStats.AvgRating > 0 || rStats.TotalDisputes > 0 || rStats.TotalCitizenRatings > 0 {
+				raw.AvgCitizenRating = rStats.AvgRating
+				raw.TotalDisputes = rStats.TotalDisputes
+				totalCitizenRatings = rStats.TotalCitizenRatings
+			}
 		}
 	}
 
@@ -498,6 +758,7 @@ func (r *kpiLogRepository) GetKPISummary(filter domain.KPIQueryFilter) (*domain.
 		SLAComplianceRate:     slaComplianceRate,
 		TotalSLABreachedCases: totalBreached,
 		AvgCitizenRating:      raw.AvgCitizenRating,
+		TotalCitizenRatings:   totalCitizenRatings,
 		TotalDisputes:         raw.TotalDisputes,
 		Thresholds:            thresholds,
 	}
@@ -1022,7 +1283,9 @@ func (r *kpiLogRepository) getPRStaffDetail(userID string, filter domain.KPIQuer
 		WHERE a.id = ?
 		LIMIT 1
 	`
-	_ = r.db.Raw(adminSQL, userID).Scan(&info).Error
+	if err := r.db.Raw(adminSQL, userID).Scan(&info).Error; err != nil {
+		log.Printf("⚠️ [KPIRepo] Failed to load staff info for user %s: %v", userID, err)
+	}
 
 	var prDateCond string
 	var prArgs []interface{}
@@ -1176,7 +1439,9 @@ func (r *kpiLogRepository) getCCTVStaffDetail(userID string, filter domain.KPIQu
 		WHERE a.id = ?
 		LIMIT 1
 	`
-	_ = r.db.Raw(adminSQL, userID).Scan(&info).Error
+	if err := r.db.Raw(adminSQL, userID).Scan(&info).Error; err != nil {
+		log.Printf("⚠️ [KPIRepo] Failed to load staff info for user %s: %v", userID, err)
+	}
 
 	type camStats struct {
 		TotalCameras  int64 `gorm:"column:total_cameras"`
@@ -1315,7 +1580,9 @@ func (r *kpiLogRepository) getVerifyStaffDetail(userID string, filter domain.KPI
 		WHERE a.id::text = ?
 		LIMIT 1
 	`
-	_ = r.db.Raw(adminSQL, userID).Scan(&info).Error
+	if err := r.db.Raw(adminSQL, userID).Scan(&info).Error; err != nil {
+		log.Printf("⚠️ [KPIRepo] Failed to load staff info for user %s: %v", userID, err)
+	}
 
 	type verifyStats struct {
 		VerifiedCount  int64   `gorm:"column:verified_count"`
@@ -1460,7 +1727,9 @@ func (r *kpiLogRepository) GetStaffDetail(userID string, filter domain.KPIQueryF
 		WHERE a.id = ?
 		LIMIT 1
 	`
-	_ = r.db.Raw(adminSQL, userID).Scan(&info).Error
+	if err := r.db.Raw(adminSQL, userID).Scan(&info).Error; err != nil {
+		log.Printf("⚠️ [KPIRepo] Failed to load staff info for user %s: %v", userID, err)
+	}
 
 	whereSQL := "WHERE (k.target_user_id = ? OR k.actor_id = ?)"
 	args := []interface{}{userID, userID}
@@ -1638,7 +1907,9 @@ func (r *kpiLogRepository) GetManagerDetail(userID string, filter domain.KPIQuer
 		WHERE a.id = ?
 		LIMIT 1
 	`
-	_ = r.db.Raw(adminSQL, userID).Scan(&info).Error
+	if err := r.db.Raw(adminSQL, userID).Scan(&info).Error; err != nil {
+		log.Printf("⚠️ [KPIRepo] Failed to load staff info for user %s: %v", userID, err)
+	}
 
 	whereSQL := "WHERE k.actor_id = ? AND k.event_code IN ('COMPLAINT_MANAGER_ASSIGNED', 'COMPLAINT_CENTER_FORWARDED', 'COMPLAINT_DEPT_RETURNED')"
 	args := []interface{}{userID}

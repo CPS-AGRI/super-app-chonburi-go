@@ -1,5 +1,7 @@
 package domain
 
+import "time"
+
 // Raw models returned from ff-weather-service (10.1.2.25:50059)
 
 type FahfonStationItem struct {
@@ -94,12 +96,19 @@ type WeatherSensor struct {
 	Temp              float64 `json:"temp"`        // Celsius
 	Temperature       float64 `json:"temperature"` // Celsius (Open API alias)
 	Humidity          float64 `json:"humidity"`    // %
-	RainRate          float64 `json:"rainRate"`    // mm/h
-	RainDaily         float64 `json:"rainDaily"`   // mm
-	WindSpeed         float64 `json:"windSpeed"`   // m/s
+	RainRate          float64 `json:"rainRate"`          // mm/h
+	RainHourly        float64 `json:"rainHourly"`        // mm/h
+	RainDaily         float64 `json:"rainDaily"`         // mm
+	WindSpeed         float64 `json:"windSpeed"`         // m/s
 	WindDirection     float64 `json:"windDirection"`
 	WindDirectionText string  `json:"windDirectionText"`
-	PM25              float64 `json:"pm25"`        // ug/m3
+	PM1               float64 `json:"pm1,omitempty"`     // ug/m3
+	PM25              float64 `json:"pm25"`              // ug/m3
+	PM4               float64 `json:"pm4,omitempty"`     // ug/m3
+	PM10              float64 `json:"pm10,omitempty"`    // ug/m3
+	CO2               float64 `json:"co2,omitempty"`     // ppm
+	UVIndex           float64 `json:"uvIndex,omitempty"` // UV Index
+	LightIntensity    float64 `json:"lightIntensity,omitempty"` // W/m2
 	Pressure          float64 `json:"pressure"`    // hPa
 	AirPressure       float64 `json:"airPressure"` // hPa alias
 	Status            string  `json:"status"`       // "normal" | "warning" | "danger"
@@ -136,4 +145,117 @@ type WeatherQueryFilter struct {
 	Status    string // "normal" | "warning" | "danger" | "all"
 	Page      int
 	PageSize  int
+}
+
+// WeatherAlertSetting represents real persisted alert rules in PostgreSQL
+type WeatherAlertSetting struct {
+	ID              string    `gorm:"primaryKey;column:id" json:"id"`
+	ModuleKey       string    `gorm:"column:module_key;default:'weather'" json:"module_key"`
+	Name            string    `gorm:"column:name;not null" json:"name"`
+	Parameter       string    `gorm:"column:parameter;not null" json:"parameter"` // pm25, rain_hourly, rain_daily, etc.
+	Condition       string    `gorm:"column:condition;not null" json:"condition"` // greater_than, less_than
+	Value           float64   `gorm:"column:value;not null" json:"value"`
+	Unit            string    `gorm:"column:unit;not null" json:"unit"`
+	Severity        string    `gorm:"column:severity;not null" json:"severity"` // info, warning, danger
+	MessageTitle    string    `gorm:"column:message_title;not null" json:"message_title"`
+	MessageBody     string    `gorm:"column:message_body;not null" json:"message_body"`
+	ImageMode       string    `gorm:"column:image_mode;default:'auto_card'" json:"image_mode"`
+	CustomImageURL  string    `gorm:"column:custom_image_url" json:"custom_image_url,omitempty"`
+	CooldownMinutes int       `gorm:"column:cooldown_minutes;default:60" json:"cooldown_minutes"`
+	SendSMS         bool      `gorm:"column:send_sms;default:false" json:"send_sms"`
+	SendPush        bool      `gorm:"column:send_push;default:true" json:"send_push"`
+	Status          string    `gorm:"column:status;default:'online'" json:"status"`
+	CreatedBy       string    `gorm:"column:created_by" json:"created_by"`
+	CreatedDate     string    `gorm:"column:created_date" json:"created_date"`
+	CreatedAt       time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	UpdatedAt       time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+}
+
+func (WeatherAlertSetting) TableName() string {
+	return "weather_alert_settings"
+}
+
+// WeatherCardTemplate represents background images for 3 alert severities
+type WeatherCardTemplate struct {
+	Severity      string    `gorm:"primaryKey;column:severity" json:"severity"` // info, warning, danger
+	BackgroundURL string    `gorm:"column:background_url;not null" json:"background_url"`
+	UpdatedBy     string    `gorm:"column:updated_by" json:"updated_by"`
+	UpdatedAt     time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+}
+
+func (WeatherCardTemplate) TableName() string {
+	return "weather_card_templates"
+}
+
+// WeatherStationMetadata represents custom aliases, landmarks, and overrides in Chonburi DB
+type WeatherStationMetadata struct {
+	Serial       string    `gorm:"primaryKey;column:serial" json:"serial"`
+	PoleCode     string    `gorm:"column:pole_code" json:"pole_code"`
+	CustomName   string    `gorm:"column:custom_name;not null" json:"custom_name"`
+	LandmarkDesc string    `gorm:"column:landmark_desc" json:"landmark_desc"`
+	Subdistrict  string    `gorm:"column:subdistrict" json:"subdistrict"`
+	District     string    `gorm:"column:district" json:"district"`
+	AdminZone    string    `gorm:"column:admin_zone" json:"admin_zone"`
+	UpdatedBy    string    `gorm:"column:updated_by" json:"updated_by"`
+	UpdatedAt    time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+}
+
+func (WeatherStationMetadata) TableName() string {
+	return "weather_station_metadata"
+}
+
+// UserWeatherSubscription represents a citizen's weather alert subscription area
+type UserWeatherSubscription struct {
+	ID          string    `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"id"`
+	UserID      string    `gorm:"type:uuid;not null;index:idx_uws_user_id" json:"user_id"`
+	District    string    `gorm:"type:text;not null" json:"district"`
+	Subdistrict string    `gorm:"type:text;not null" json:"subdistrict"`
+	IsPrimary   bool      `gorm:"type:boolean;not null;default:false" json:"is_primary"`
+	IsActive    bool      `gorm:"type:boolean;not null;default:true" json:"is_active"`
+	CreatedAt   time.Time `gorm:"type:timestamptz;not null;default:now()" json:"created_at"`
+	UpdatedAt   time.Time `gorm:"type:timestamptz;not null;default:now()" json:"updated_at"`
+}
+
+func (UserWeatherSubscription) TableName() string {
+	return "user_weather_subscriptions"
+}
+
+// WeatherAlertHistory represents an issued weather alert entry for notification feed
+type WeatherAlertHistory struct {
+	ID          string    `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"id"`
+	Subdistrict string    `gorm:"type:varchar(100);not null;index:idx_wah_subdistrict" json:"subdistrict"`
+	District    string    `gorm:"type:varchar(100);not null" json:"district"`
+	Title       string    `gorm:"type:varchar(255);not null" json:"title"`
+	Message     string    `gorm:"type:text;not null" json:"message"`
+	Severity    string    `gorm:"type:varchar(20);not null;default:'info'" json:"severity"`
+	AlertType   string    `gorm:"type:varchar(50);not null;default:'general'" json:"alert_type"`
+	ImageURL    string    `gorm:"type:text" json:"image_url"`
+	SentCount   int       `gorm:"type:int;not null;default:0" json:"sent_count"`
+	CreatedAt   time.Time `gorm:"type:timestamptz;not null;default:now();index:idx_wah_created_at_desc,sort:desc" json:"created_at"`
+}
+
+func (WeatherAlertHistory) TableName() string {
+	return "weather_alert_history"
+}
+
+// TelemetryHistoryRecord represents a historical IoT sensor telemetry record from TimescaleDB
+type TelemetryHistoryRecord struct {
+	Time           string  `json:"time"`
+	TimeOnsite     string  `json:"time_onsite"`
+	Temp           float64 `json:"temp"`
+	Humid          float64 `json:"humid"`
+	Press          float64 `json:"press"`
+	RainRate       float64 `json:"rain_rate"`
+	RainHourly     float64 `json:"rain_hourly"`
+	RainDaily      float64 `json:"rain_daily"`
+	PM1            float64 `json:"pm1"`
+	PM25           float64 `json:"pm25"`
+	PM40           float64 `json:"pm40"`
+	PM10           float64 `json:"pm10"`
+	WindSpeed      float64 `json:"wind_speed"`
+	WindDirection  float64 `json:"wind_direction"`
+	CO2            float64 `json:"co2"`
+	UV             float64 `json:"uv"`
+	Battery        float64 `json:"battery"`
+	SignalStrength float64 `json:"signal_strength"`
 }

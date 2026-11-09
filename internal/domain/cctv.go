@@ -125,6 +125,7 @@ type CCTVUserSummaryItem struct {
 	LastViewedText   string `json:"last_viewed_text"` // e.g. 24 ส.ค. 69 08:57
 	TotalMinutes     int    `json:"total_minutes"`
 	TotalMinutesText string `json:"total_minutes_text"` // e.g. 697 นาที
+	TotalSeconds     int64  `json:"total_seconds"`      // e.g. 41820
 	TimeLimitText    string `json:"time_limit_text"` // e.g. ไม่จำกัด
 	Status           string `json:"status"` // e.g. ปกติ
 }

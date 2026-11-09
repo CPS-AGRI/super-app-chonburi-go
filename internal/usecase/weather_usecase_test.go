@@ -116,6 +116,37 @@ func (m *mockWeatherRepo) GetPattaya165Meta(serial string) (domain.PattayaStatio
 
 func (m *mockWeatherRepo) FlushCache(ctx context.Context) {}
 
+func (m *mockWeatherRepo) GetAlertSettings(ctx context.Context) ([]domain.WeatherAlertSetting, error) {
+	return nil, nil
+}
+func (m *mockWeatherRepo) CreateAlertSetting(ctx context.Context, item *domain.WeatherAlertSetting) error {
+	return nil
+}
+func (m *mockWeatherRepo) UpdateAlertSetting(ctx context.Context, id string, updates map[string]interface{}) (*domain.WeatherAlertSetting, error) {
+	return nil, nil
+}
+func (m *mockWeatherRepo) DeleteAlertSetting(ctx context.Context, id string) error {
+	return nil
+}
+func (m *mockWeatherRepo) GetCardTemplates(ctx context.Context) (map[string]string, error) {
+	return nil, nil
+}
+func (m *mockWeatherRepo) UpdateCardTemplate(ctx context.Context, severity, backgroundURL, updatedBy string) error {
+	return nil
+}
+func (m *mockWeatherRepo) GetStationMetadata(ctx context.Context, serial string) (*domain.WeatherStationMetadata, error) {
+	return nil, nil
+}
+func (m *mockWeatherRepo) GetAllStationMetadata(ctx context.Context) (map[string]domain.WeatherStationMetadata, error) {
+	return nil, nil
+}
+func (m *mockWeatherRepo) UpsertStationMetadata(ctx context.Context, meta *domain.WeatherStationMetadata) error {
+	return nil
+}
+func (m *mockWeatherRepo) FetchStationHistory(ctx context.Context, serial, imei, rangeType, date, startDate, endDate string) ([]domain.TelemetryHistoryRecord, error) {
+	return nil, nil
+}
+
 func TestWeatherUseCase_PattayaScope(t *testing.T) {
 	mockRepo := newMockWeatherRepo()
 	uc := usecase.NewWeatherUseCase(mockRepo)

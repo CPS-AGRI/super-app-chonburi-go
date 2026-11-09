@@ -91,6 +91,16 @@ func (h *AdminHandler) UpdateAdmin(c fiber.Ctx) error {
 
 func (h *AdminHandler) DeleteAdmin(c fiber.Ctx) error {
 	id := c.Params("id")
+
+	// Prevent self-deletion
+	if claims, ok := c.Locals("user").(*jwtutil.CustomClaims); ok && claims != nil {
+		if claims.ID == id {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error": "ไม่สามารถลบบัญชีของตนเองได้ (Cannot delete your own account)",
+			})
+		}
+	}
+
 	if err := h.adminUseCase.DeleteAdmin(id); err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}

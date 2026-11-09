@@ -2,6 +2,8 @@ package usecase
 
 import (
 	"errors"
+	"fmt"
+	"strings"
 	"time"
 
 	"super-app-chonburi-go/internal/domain"
@@ -10,11 +12,15 @@ import (
 )
 
 type verificationUseCase struct {
-	repo domain.AdminVerificationRepository
+	repo      domain.AdminVerificationRepository
+	auditRepo domain.AuditLogRepository
 }
 
-func NewVerificationUseCase(repo domain.AdminVerificationRepository) domain.AdminVerificationUseCase {
-	return &verificationUseCase{repo: repo}
+func NewVerificationUseCase(repo domain.AdminVerificationRepository, auditRepo domain.AuditLogRepository) domain.AdminVerificationUseCase {
+	return &verificationUseCase{
+		repo:      repo,
+		auditRepo: auditRepo,
+	}
 }
 
 func (u *verificationUseCase) GetVerifications(query domain.VerificationQuery) (*domain.PaginatedVerificationResponse, error) {
@@ -29,6 +35,47 @@ func (u *verificationUseCase) GetVerifications(query domain.VerificationQuery) (
 
 func (u *verificationUseCase) GetVerificationByID(userID uuid.UUID) (*domain.UserVerificationItem, error) {
 	return u.repo.GetByID(userID)
+}
+
+func (u *verificationUseCase) UnmaskCitizenID(userID uuid.UUID, adminID string, role string, ip string, userAgent string, traceID string) (string, error) {
+	rLower := strings.ToLower(role)
+	isSupervisor := strings.Contains(rLower, "super") ||
+		strings.Contains(rLower, "manager") ||
+		strings.Contains(rLower, "executive") ||
+		strings.Contains(rLower, "หัวหน้า") ||
+		strings.Contains(rLower, "ผู้บริหาร")
+
+	if !isSupervisor {
+		return "", errors.New("FORBIDDEN: เฉพาะระดับหัวหน้างานขึ้นไปเท่านั้นที่สามารถดูเลขบัตรประชาชนฉบับเต็มได้")
+	}
+
+	fullID, err := u.repo.GetUnmaskedCitizenID(userID)
+	if err != nil {
+		return "", err
+	}
+
+	// Record audit log
+	if u.auditRepo != nil {
+		if traceID == "" {
+			traceID = uuid.New().String()
+		}
+		audit := &domain.AuditLog{
+			ID:                 uuid.New().String(),
+			TraceId:            traceID,
+			UserId:             adminID,
+			RoleId:             role,
+			Method:             "POST",
+			Path:               fmt.Sprintf("/api/v1/verifications/%s/unmask-id", userID.String()),
+			ResponseStatusCode: 200,
+			IPAddress:          ip,
+			UserAgent:          userAgent,
+			RequestTime:        time.Now(),
+			ResponseTime:       time.Now(),
+		}
+		_ = u.auditRepo.Create(audit)
+	}
+
+	return fullID, nil
 }
 
 func (u *verificationUseCase) ApproveVerification(req *domain.ApproveVerificationRequest, adminUserID string) error {

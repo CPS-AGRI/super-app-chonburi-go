@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 	"super-app-chonburi-go/internal/domain"
+	"super-app-chonburi-go/pkg/crypto"
 	"time"
 
 	"gorm.io/gorm"
@@ -195,9 +196,8 @@ func (r *complaintRepository) GetByID(id string, allowedModuleTypeIDs []string, 
 
 	if err == nil && complaint.User != nil && complaint.User.Information != nil {
 		info := *complaint.User.Information
-		if strings.HasPrefix(info.IdentityNumberEncrypted, "ENC_") {
-			info.IdentityNumberEncrypted = info.IdentityNumberEncrypted[4:]
-		}
+		info.IdentityNumberEncrypted = crypto.DecryptPID(info.IdentityNumberEncrypted)
+		info.LaserIdEncrypted = crypto.DecryptPID(info.LaserIdEncrypted)
 		complaint.UserInformation = &info
 	}
 

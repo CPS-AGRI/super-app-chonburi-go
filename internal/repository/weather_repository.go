@@ -10,6 +10,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -59,6 +60,24 @@ type WeatherRepository interface {
 	GetPattaya165List() []domain.PattayaStationMeta
 	GetPattaya165Meta(serial string) (domain.PattayaStationMeta, bool)
 	FlushCache(ctx context.Context)
+
+	// Alert Settings (Real Database in PostgreSQL)
+	GetAlertSettings(ctx context.Context) ([]domain.WeatherAlertSetting, error)
+	CreateAlertSetting(ctx context.Context, item *domain.WeatherAlertSetting) error
+	UpdateAlertSetting(ctx context.Context, id string, updates map[string]interface{}) (*domain.WeatherAlertSetting, error)
+	DeleteAlertSetting(ctx context.Context, id string) error
+
+	// Card Templates
+	GetCardTemplates(ctx context.Context) (map[string]string, error)
+	UpdateCardTemplate(ctx context.Context, severity, backgroundURL, updatedBy string) error
+
+	// Station Metadata & Custom Aliases
+	GetStationMetadata(ctx context.Context, serial string) (*domain.WeatherStationMetadata, error)
+	GetAllStationMetadata(ctx context.Context) (map[string]domain.WeatherStationMetadata, error)
+	UpsertStationMetadata(ctx context.Context, meta *domain.WeatherStationMetadata) error
+
+	// Historical Telemetry Data from TimescaleDB
+	FetchStationHistory(ctx context.Context, serial, imei, rangeType, date, startDate, endDate string) ([]domain.TelemetryHistoryRecord, error)
 }
 
 type weatherRepository struct {
@@ -75,6 +94,10 @@ type weatherRepository struct {
 	l1Mu       sync.RWMutex
 	l1Cache    []domain.WeatherSensor
 	l1CachedAt time.Time
+
+	// Spatial Resolver: tracks serials already resolved to subdistrict (resolve once per serial lifetime)
+	resolvedMu    sync.RWMutex
+	resolvedCache map[string]bool // serial -> already resolved & upserted
 }
 
 func NewWeatherRepository(db *gorm.DB, cfg *config.Config, rdb *redis.Client) WeatherRepository {
@@ -94,6 +117,7 @@ func NewWeatherRepository(db *gorm.DB, cfg *config.Config, rdb *redis.Client) We
 			Transport: tr,
 		},
 		pattaya165Map: make(map[string]domain.PattayaStationMeta),
+		resolvedCache: make(map[string]bool),
 	}
 
 	// Parse embedded Pattaya 165 Registry into memory (Zero disk I/O, O(1) lookup)
@@ -242,6 +266,17 @@ func (r *weatherRepository) FetchAllSensors(ctx context.Context) ([]domain.Weath
 			}
 		}
 
+		// Load custom station metadata/aliases from Chonburi DB
+		customMetaMap := make(map[string]domain.WeatherStationMetadata)
+		if r.db != nil {
+			var metas []domain.WeatherStationMetadata
+			if err := r.db.WithContext(ctx).Find(&metas).Error; err == nil {
+				for _, m := range metas {
+					customMetaMap[m.Serial] = m
+				}
+			}
+		}
+
 		// Normalize & Deduplicate by Serial/IMEI
 		sensorMap := make(map[string]domain.WeatherSensor)
 		for _, it := range rawItems {
@@ -307,15 +342,17 @@ func (r *weatherRepository) FetchAllSensors(ctx context.Context) ([]domain.Weath
 				siteName = deviceName
 			}
 
-			// Metadata lookup from Pattaya 165 Registry
-			meta, hasMeta := r.GetPattaya165Meta(serial)
+			// --- Spatial Resolution: Lat/Lon → Subdistrict/District ---
+			// Priority: 1) customMeta (Admin override) 2) Pattaya 165 file 3) Spatial Resolver (Auto)
+
 			poleCode := ""
 			adminZone := ""
 			subdistrict := "ชลบุรี"
 			district := "ชลบุรี"
 			order := 0
 
-			if hasMeta {
+			// Priority 2: Pattaya 165 Registry (backward compat — only for matched serials)
+			if meta, hasMeta := r.GetPattaya165Meta(serial); hasMeta {
 				poleCode = meta.PoleCode
 				adminZone = meta.AdminZone
 				subdistrict = meta.Subdistrict
@@ -323,6 +360,64 @@ func (r *weatherRepository) FetchAllSensors(ctx context.Context) ([]domain.Weath
 				order = meta.Order
 				deviceName = fmt.Sprintf("เสาตรวจวัด %s (%s)", poleCode, adminZone)
 				siteName = fmt.Sprintf("%s ต.%s อ.%s", adminZone, subdistrict, district)
+			}
+
+			// Priority 1: Custom Alias / Landmark Override from Chonburi DB (highest priority)
+			if customMeta, hasCustom := customMetaMap[serial]; hasCustom && customMeta.CustomName != "" {
+				deviceName = customMeta.CustomName
+				if customMeta.PoleCode != "" {
+					poleCode = customMeta.PoleCode
+				}
+				if customMeta.Subdistrict != "" {
+					subdistrict = customMeta.Subdistrict
+				}
+				if customMeta.District != "" {
+					district = customMeta.District
+				}
+				if customMeta.AdminZone != "" {
+					adminZone = customMeta.AdminZone
+				}
+				if customMeta.LandmarkDesc != "" {
+					siteName = fmt.Sprintf("%s (%s ต.%s อ.%s)", customMeta.LandmarkDesc, adminZone, subdistrict, district)
+				}
+			} else if subdistrict == "ชลบุรี" && lat != 0 && lng != 0 {
+				// Priority 3: Spatial Auto-Resolve — only when subdistrict still unknown
+				// Check if this serial has already been resolved to avoid repeated UPSERT
+				r.resolvedMu.RLock()
+				alreadyResolved := r.resolvedCache[serial]
+				r.resolvedMu.RUnlock()
+
+				resolvedSub, resolvedDist := globalSpatialResolver.Resolve(lat, lng)
+				subdistrict = resolvedSub
+				district = resolvedDist
+
+				if !alreadyResolved && r.db != nil {
+					// Fire-and-forget UPSERT into weather_station_metadata (non-blocking)
+					go func(s, sub, dist string) {
+						upsertMeta := &domain.WeatherStationMetadata{
+							Serial:      s,
+							Subdistrict: sub,
+							District:    dist,
+						}
+						result := r.db.Where("serial = ?", s).FirstOrCreate(upsertMeta)
+						if result.Error == nil {
+							// If record existed but subdistrict was blank, patch it
+							if upsertMeta.Subdistrict == "" || upsertMeta.Subdistrict == "ชลบุรี" {
+								r.db.Model(upsertMeta).Where("serial = ?", s).Updates(map[string]interface{}{
+									"subdistrict": sub,
+									"district":    dist,
+								})
+							}
+							log.Printf("✅ [SpatialResolver] %s → ต.%s อ.%s (auto-mapped from Lat/Lon)", s, sub, dist)
+						} else {
+							log.Printf("⚠️ [SpatialResolver] UPSERT failed for %s: %v", s, result.Error)
+						}
+					}(serial, resolvedSub, resolvedDist)
+
+					r.resolvedMu.Lock()
+					r.resolvedCache[serial] = true
+					r.resolvedMu.Unlock()
+				}
 			}
 
 			updatedTime := timeStr
@@ -349,11 +444,18 @@ func (r *weatherRepository) FetchAllSensors(ctx context.Context) ([]domain.Weath
 				Temperature:       temp,
 				Humidity:          humidity,
 				RainRate:          rainRate,
+				RainHourly:        it.Parameters.HourlyAccumRain,
 				RainDaily:         rainDaily,
 				WindSpeed:         windSpeed,
 				WindDirection:     deg,
 				WindDirectionText: getWindCompassText(deg),
+				PM1:               it.Parameters.PM1dot0,
 				PM25:              pm25,
+				PM4:               it.Parameters.PM4,
+				PM10:              it.Parameters.PM10,
+				CO2:               it.Parameters.CO2,
+				UVIndex:           it.Parameters.UVIndex,
+				LightIntensity:    it.Parameters.LightIntensity,
 				Pressure:          pressure,
 				AirPressure:       pressure,
 				Status:            status,
@@ -367,6 +469,23 @@ func (r *weatherRepository) FetchAllSensors(ctx context.Context) ([]domain.Weath
 		sensors := make([]domain.WeatherSensor, 0, len(sensorMap))
 		for _, s := range sensorMap {
 			sensors = append(sensors, s)
+		}
+
+		// Ensure PostgreSQL weather_station_metadata has all active stations
+		if r.db != nil && len(sensorMap) > 0 {
+			go func(items []domain.WeatherSensor) {
+				for _, sItem := range items {
+					meta := domain.WeatherStationMetadata{
+						Serial:      sItem.Serial,
+						PoleCode:    sItem.PoleCode,
+						CustomName:  sItem.Name,
+						Subdistrict: sItem.Subdistrict,
+						District:    sItem.District,
+						AdminZone:   sItem.AdminZone,
+					}
+					_ = r.db.Where("serial = ?", sItem.Serial).FirstOrCreate(&meta).Error
+				}
+			}(sensors)
 		}
 
 		// Update L1 Cache
@@ -562,4 +681,411 @@ func formatFrameTime(formatted string) string {
 		return fmt.Sprintf("%s:%s น.", hh, mm)
 	}
 	return formatted
+}
+
+// --- Alert Settings CRUD (PostgreSQL) ---
+
+func (r *weatherRepository) GetAlertSettings(ctx context.Context) ([]domain.WeatherAlertSetting, error) {
+	if r.db == nil {
+		return nil, fmt.Errorf("database connection unavailable")
+	}
+	var settings []domain.WeatherAlertSetting
+	err := r.db.WithContext(ctx).Order("created_at DESC").Find(&settings).Error
+	return settings, err
+}
+
+func (r *weatherRepository) CreateAlertSetting(ctx context.Context, item *domain.WeatherAlertSetting) error {
+	if r.db == nil {
+		return fmt.Errorf("database connection unavailable")
+	}
+	if item.ID == "" {
+		item.ID = fmt.Sprintf("W-%03d", time.Now().UnixNano()%1000)
+	}
+	item.CreatedAt = time.Now()
+	item.UpdatedAt = time.Now()
+	return r.db.WithContext(ctx).Create(item).Error
+}
+
+func (r *weatherRepository) UpdateAlertSetting(ctx context.Context, id string, updates map[string]interface{}) (*domain.WeatherAlertSetting, error) {
+	if r.db == nil {
+		return nil, fmt.Errorf("database connection unavailable")
+	}
+	updates["updated_at"] = time.Now()
+	var setting domain.WeatherAlertSetting
+	if err := r.db.WithContext(ctx).Where("id = ?", id).First(&setting).Error; err != nil {
+		return nil, err
+	}
+	if err := r.db.WithContext(ctx).Model(&setting).Updates(updates).Error; err != nil {
+		return nil, err
+	}
+	r.db.WithContext(ctx).Where("id = ?", id).First(&setting)
+	return &setting, nil
+}
+
+func (r *weatherRepository) DeleteAlertSetting(ctx context.Context, id string) error {
+	if r.db == nil {
+		return fmt.Errorf("database connection unavailable")
+	}
+	return r.db.WithContext(ctx).Where("id = ?", id).Delete(&domain.WeatherAlertSetting{}).Error
+}
+
+// --- Card Templates Management ---
+
+func (r *weatherRepository) GetCardTemplates(ctx context.Context) (map[string]string, error) {
+	minioBase := os.Getenv("MINIO_PUBLIC_BASE_URL")
+	if minioBase == "" {
+		minioBase = "https://uat-super-app-chonburi-api.mueangsmart.com"
+	}
+	bucket := os.Getenv("MINIO_BUCKET")
+	if bucket == "" {
+		bucket = "super-app-assets"
+	}
+	baseURL := fmt.Sprintf("%s/%s/weather-templates", strings.TrimRight(minioBase, "/"), bucket)
+
+	result := map[string]string{
+		"info":    fmt.Sprintf("%s/bg_info_cinematic.jpg", baseURL),
+		"warning": fmt.Sprintf("%s/bg_warning_cinematic.jpg", baseURL),
+		"danger":  fmt.Sprintf("%s/bg_danger_cinematic.jpg", baseURL),
+	}
+	if r.db == nil {
+		return result, nil
+	}
+	var templates []domain.WeatherCardTemplate
+	if err := r.db.WithContext(ctx).Find(&templates).Error; err == nil {
+		for _, t := range templates {
+			if t.BackgroundURL != "" {
+				result[t.Severity] = t.BackgroundURL
+			}
+		}
+	}
+	return result, nil
+}
+
+func (r *weatherRepository) UpdateCardTemplate(ctx context.Context, severity, backgroundURL, updatedBy string) error {
+	if r.db == nil {
+		return fmt.Errorf("database connection unavailable")
+	}
+	template := domain.WeatherCardTemplate{
+		Severity:      severity,
+		BackgroundURL: backgroundURL,
+		UpdatedBy:     updatedBy,
+		UpdatedAt:     time.Now(),
+	}
+	return r.db.WithContext(ctx).Save(&template).Error
+}
+
+// --- Station Metadata & Custom Aliases ---
+
+func (r *weatherRepository) GetStationMetadata(ctx context.Context, serial string) (*domain.WeatherStationMetadata, error) {
+	if r.db == nil {
+		return nil, fmt.Errorf("database connection unavailable")
+	}
+	var meta domain.WeatherStationMetadata
+	err := r.db.WithContext(ctx).Where("serial = ?", serial).First(&meta).Error
+	if err != nil {
+		return nil, err
+	}
+	return &meta, nil
+}
+
+func (r *weatherRepository) GetAllStationMetadata(ctx context.Context) (map[string]domain.WeatherStationMetadata, error) {
+	result := make(map[string]domain.WeatherStationMetadata)
+	if r.db == nil {
+		return result, nil
+	}
+	var metas []domain.WeatherStationMetadata
+	err := r.db.WithContext(ctx).Find(&metas).Error
+	if err != nil {
+		return result, err
+	}
+	for _, m := range metas {
+		result[m.Serial] = m
+	}
+	return result, nil
+}
+
+func (r *weatherRepository) UpsertStationMetadata(ctx context.Context, meta *domain.WeatherStationMetadata) error {
+	if r.db == nil {
+		return fmt.Errorf("database connection unavailable")
+	}
+	meta.UpdatedAt = time.Now()
+	err := r.db.WithContext(ctx).Save(meta).Error
+	if err == nil {
+		// Invalidate cache immediately so new custom alias is active across all endpoints
+		r.FlushCache(ctx)
+	}
+	return err
+}
+
+func (r *weatherRepository) FetchStationHistory(ctx context.Context, serial, imei, rangeType, date, startDate, endDate string) ([]domain.TelemetryHistoryRecord, error) {
+	if rangeType == "" {
+		rangeType = "hourly"
+	}
+
+	targetImei := imei
+	if targetImei == "" {
+		targetImei = serial
+	}
+
+	isRangeOrCustomDate := (startDate != "" && endDate != "") || date != ""
+
+	// Helper: Query FahfonWeatherBaseURL (ff-weather-service at 10.1.2.25:50059)
+	fetchFromFahfonWeather := func() ([]domain.TelemetryHistoryRecord, error) {
+		if r.cfg.FahfonWeatherBaseURL == "" || targetImei == "" {
+			return nil, fmt.Errorf("fahfon weather baseURL or imei empty")
+		}
+		baseURL := strings.TrimRight(r.cfg.FahfonWeatherBaseURL, "/")
+		reqURL := fmt.Sprintf("%s/api/v1/weather/stations/imei/%s/graph", baseURL, url.PathEscape(targetImei))
+		params := url.Values{}
+		if startDate != "" && endDate != "" {
+			params.Set("start_date", startDate)
+			params.Set("end_date", endDate)
+		} else if date != "" {
+			params.Set("date", date)
+		}
+		if len(params) > 0 {
+			reqURL += "?" + params.Encode()
+		}
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("x-service-key", r.cfg.FahfonServiceKey)
+		req.Header.Set("Accept", "application/json")
+		resp, err := r.httpClient.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("fahfon weather HTTP status %d", resp.StatusCode)
+		}
+
+		var graphResp struct {
+			Parameters []struct {
+				Time             string  `json:"time"`
+				Temp             float64 `json:"temp"`
+				RelativeHumidity float64 `json:"relativeHumidity"`
+				BarometricPres   float64 `json:"barometricPres"`
+				WindSpeed        float64 `json:"windSpeed"`
+				WindDirection    float64 `json:"windDirection"`
+				RainIntensity    float64 `json:"rainIntensity"`
+				RainHourly       float64 `json:"rainHourly"`
+				RainDaily        float64 `json:"rainDaily"`
+				UV               float64 `json:"uv"`
+				PM1              float64 `json:"pm1"`
+				PM25             float64 `json:"pm25"`
+				PM4              float64 `json:"pm4"`
+				PM10             float64 `json:"pm10"`
+				CO2              float64 `json:"co2"`
+			} `json:"parameters"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&graphResp); err != nil {
+			return nil, err
+		}
+		if len(graphResp.Parameters) == 0 {
+			return nil, fmt.Errorf("no parameters in graph response")
+		}
+
+		records := make([]domain.TelemetryHistoryRecord, 0, len(graphResp.Parameters))
+		for _, p := range graphResp.Parameters {
+			records = append(records, domain.TelemetryHistoryRecord{
+				Time:          p.Time,
+				TimeOnsite:    p.Time,
+				Temp:          p.Temp,
+				Humid:         p.RelativeHumidity,
+				Press:         p.BarometricPres,
+				RainRate:      p.RainIntensity,
+				RainHourly:    p.RainHourly,
+				RainDaily:     p.RainDaily,
+				PM1:           p.PM1,
+				PM25:          p.PM25,
+				PM40:          p.PM4,
+				PM10:          p.PM10,
+				WindSpeed:     p.WindSpeed,
+				WindDirection: p.WindDirection,
+				CO2:           p.CO2,
+				UV:            p.UV,
+			})
+		}
+		return records, nil
+	}
+
+	// Helper: Query RiverServiceURL (IoT Core at 10.1.2.19:8081)
+	fetchFromRiverService := func() ([]domain.TelemetryHistoryRecord, error) {
+		if r.cfg.RiverServiceURL == "" {
+			return nil, fmt.Errorf("river service URL empty")
+		}
+		baseURL := strings.TrimRight(r.cfg.RiverServiceURL, "/")
+		reqURL := fmt.Sprintf("%s/api/v1/fahfon-sense/devices/%s/detail?range=%s", baseURL, url.PathEscape(serial), url.QueryEscape(rangeType))
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Accept", "application/json")
+		if r.cfg.FahfonServiceKey != "" {
+			req.Header.Set("x-service-key", r.cfg.FahfonServiceKey)
+		}
+		resp, err := r.httpClient.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("river service HTTP status %d", resp.StatusCode)
+		}
+
+		var detailResp struct {
+			History []struct {
+				TimeOnsite     string  `json:"time_onsite"`
+				Time           string  `json:"time"`
+				BucketTime     string  `json:"bucket_time"`
+				Temp           float64 `json:"temp"`
+				Humid          float64 `json:"humid"`
+				Press          float64 `json:"press"`
+				WindSpeed      float64 `json:"wind_speed"`
+				WindDirection  float64 `json:"wind_direction"`
+				RainRate       float64 `json:"rain_rate"`
+				RainHourly     float64 `json:"rain_hourly"`
+				RainDaily      float64 `json:"rain_daily"`
+				UV             float64 `json:"uv"`
+				CO2            float64 `json:"co2"`
+				PM1            float64 `json:"pm1"`
+				PM25           float64 `json:"pm25"`
+				PM40           float64 `json:"pm40"`
+				PM10           float64 `json:"pm10"`
+				Battery        float64 `json:"battery"`
+				SignalStrength float64 `json:"signal_strength"`
+			} `json:"history"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&detailResp); err != nil {
+			return nil, err
+		}
+		if len(detailResp.History) == 0 {
+			return nil, fmt.Errorf("no history in river service")
+		}
+
+		records := make([]domain.TelemetryHistoryRecord, 0, len(detailResp.History))
+		for _, h := range detailResp.History {
+			timeVal := h.TimeOnsite
+			if timeVal == "" {
+				timeVal = h.Time
+			}
+			if timeVal == "" {
+				timeVal = h.BucketTime
+			}
+			records = append(records, domain.TelemetryHistoryRecord{
+				Time:           timeVal,
+				TimeOnsite:     timeVal,
+				Temp:           h.Temp,
+				Humid:          h.Humid,
+				Press:          h.Press,
+				RainRate:       h.RainRate,
+				RainHourly:     h.RainHourly,
+				RainDaily:      h.RainDaily,
+				PM1:            h.PM1,
+				PM25:           h.PM25,
+				PM40:           h.PM40,
+				PM10:           h.PM10,
+				WindSpeed:      h.WindSpeed,
+				WindDirection:  h.WindDirection,
+				CO2:            h.CO2,
+				UV:             h.UV,
+				Battery:        h.Battery,
+				SignalStrength: h.SignalStrength,
+			})
+		}
+		return records, nil
+	}
+
+	// 1. If date range or custom date is specified, prioritize FahfonWeatherBaseURL (TimescaleDB)
+	if isRangeOrCustomDate {
+		if recs, err := fetchFromFahfonWeather(); err == nil && len(recs) > 0 {
+			return recs, nil
+		}
+		if recs, err := fetchFromRiverService(); err == nil && len(recs) > 0 {
+			return recs, nil
+		}
+	} else {
+		// 2. Otherwise default to RiverService, fallback to FahfonWeather
+		if recs, err := fetchFromRiverService(); err == nil && len(recs) > 0 {
+			return recs, nil
+		}
+		if recs, err := fetchFromFahfonWeather(); err == nil && len(recs) > 0 {
+			return recs, nil
+		}
+	}
+
+	// 3. Upstream Telemetry Service fallback
+	upstreamURL := fmt.Sprintf("https://microsis.mueangsmart.com/api/v1/fahfon-sense/devices/%s/detail?range=%s", url.PathEscape(serial), url.QueryEscape(rangeType))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, upstreamURL, nil)
+	if err == nil {
+		req.Header.Set("Accept", "application/json")
+		resp, err := r.httpClient.Do(req)
+		if err == nil && resp.StatusCode == http.StatusOK {
+			defer resp.Body.Close()
+			var detailResp struct {
+				History []struct {
+					TimeOnsite     string  `json:"time_onsite"`
+					Time           string  `json:"time"`
+					BucketTime     string  `json:"bucket_time"`
+					Temp           float64 `json:"temp"`
+					Humid          float64 `json:"humid"`
+					Press          float64 `json:"press"`
+					WindSpeed      float64 `json:"wind_speed"`
+					WindDirection  float64 `json:"wind_direction"`
+					RainRate       float64 `json:"rain_rate"`
+					RainHourly     float64 `json:"rain_hourly"`
+					RainDaily      float64 `json:"rain_daily"`
+					UV             float64 `json:"uv"`
+					CO2            float64 `json:"co2"`
+					PM1            float64 `json:"pm1"`
+					PM25           float64 `json:"pm25"`
+					PM40           float64 `json:"pm40"`
+					PM10           float64 `json:"pm10"`
+					Battery        float64 `json:"battery"`
+					SignalStrength float64 `json:"signal_strength"`
+				} `json:"history"`
+			}
+			if err := json.NewDecoder(resp.Body).Decode(&detailResp); err == nil && len(detailResp.History) > 0 {
+				records := make([]domain.TelemetryHistoryRecord, 0, len(detailResp.History))
+				for _, h := range detailResp.History {
+					timeVal := h.TimeOnsite
+					if timeVal == "" {
+						timeVal = h.Time
+					}
+					if timeVal == "" {
+						timeVal = h.BucketTime
+					}
+					records = append(records, domain.TelemetryHistoryRecord{
+						Time:           timeVal,
+						TimeOnsite:     timeVal,
+						Temp:           h.Temp,
+						Humid:          h.Humid,
+						Press:          h.Press,
+						RainRate:       h.RainRate,
+						RainHourly:     h.RainHourly,
+						RainDaily:      h.RainDaily,
+						PM1:            h.PM1,
+						PM25:           h.PM25,
+						PM40:           h.PM40,
+						PM10:           h.PM10,
+						WindSpeed:      h.WindSpeed,
+						WindDirection:  h.WindDirection,
+						CO2:            h.CO2,
+						UV:             h.UV,
+						Battery:        h.Battery,
+						SignalStrength: h.SignalStrength,
+					})
+				}
+				return records, nil
+			}
+		} else if resp != nil {
+			resp.Body.Close()
+		}
+	}
+
+	return []domain.TelemetryHistoryRecord{}, nil
 }

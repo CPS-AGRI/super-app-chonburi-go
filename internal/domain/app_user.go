@@ -95,6 +95,10 @@ type UserInformation struct {
 	IsOnlineTaxPaymentReceipt bool   `gorm:"not null;default:false;column:is_online_tax_payment_receipt" json:"is_online_tax_payment_receipt"`
 	LogoUrl                   string `gorm:"type:text;not null;default:'';column:logo_url" json:"logo_url"`
 
+	PopulationType string `gorm:"type:varchar(20);not null;default:'real';column:population_type" json:"population_type"`
+	VerifiedByType string `gorm:"type:varchar(20);not null;default:'admin';column:verified_by_type" json:"verified_by_type"`
+	CardAddress    string `gorm:"type:text;not null;default:'';column:card_address" json:"card_address"`
+
 	CreatedBy   string    `gorm:"type:text;not null;default:'';column:created_by" json:"created_by"`
 	CreatedDate time.Time `gorm:"type:timestamptz;not null;default:CURRENT_TIMESTAMP;column:created_date" json:"created_date"`
 	UpdatedBy   string    `gorm:"type:text;not null;default:'';column:updated_by" json:"updated_by"`

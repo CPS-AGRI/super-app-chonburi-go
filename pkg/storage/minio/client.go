@@ -90,6 +90,10 @@ func (c *Client) PresignedGetURL(ctx context.Context, objectKey string) (string,
 	return presignedURL.String(), nil
 }
 
+func (c *Client) RemoveObject(ctx context.Context, objectKey string) error {
+	return c.S3.RemoveObject(ctx, c.Bucket, objectKey, miniosdk.RemoveObjectOptions{})
+}
+
 func (c *Client) ObjectURL(ctx context.Context, objectKey string) (string, error) {
 	if c.PublicRead && c.PublicBaseURL != "" {
 		publicURL, err := url.JoinPath(c.PublicBaseURL, c.Bucket, objectKey)

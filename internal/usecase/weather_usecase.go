@@ -1,8 +1,12 @@
 package usecase
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -16,6 +20,26 @@ type WeatherUseCase interface {
 	GetDashboardStats(ctx context.Context) (*domain.WeatherDashboardStats, error)
 	GetMapFrames(ctx context.Context, variable, animType, date string) ([]domain.WeatherTileFrame, error)
 	FlushCache(ctx context.Context)
+
+	// Alert Settings
+	GetAlertSettings(ctx context.Context) ([]domain.WeatherAlertSetting, error)
+	CreateAlertSetting(ctx context.Context, item *domain.WeatherAlertSetting) error
+	UpdateAlertSetting(ctx context.Context, id string, updates map[string]interface{}) (*domain.WeatherAlertSetting, error)
+	DeleteAlertSetting(ctx context.Context, id string) error
+
+	// Card Templates
+	GetCardTemplates(ctx context.Context) (map[string]string, error)
+	UpdateCardTemplate(ctx context.Context, severity, backgroundURL, updatedBy string) error
+
+	// Station Metadata & Custom Aliases
+	GetStationMetadata(ctx context.Context, serial string) (*domain.WeatherStationMetadata, error)
+	UpsertStationMetadata(ctx context.Context, meta *domain.WeatherStationMetadata) error
+
+	// Station History Telemetry
+	GetStationHistory(ctx context.Context, serial, rangeType, date, startDate, endDate string) ([]domain.TelemetryHistoryRecord, error)
+
+	// Test Alert Dispatch
+	DispatchTestAlert(ctx context.Context, subdistrict, district, severity, imageURL string) (int, error)
 }
 
 type weatherUseCase struct {
@@ -273,4 +297,97 @@ func (u *weatherUseCase) GetMapFrames(ctx context.Context, variable, animType, d
 	}
 
 	return u.repo.FetchMapFrames(ctx, upstreamVar, animType, date, limit)
+}
+
+// --- Alert Settings ---
+
+func (u *weatherUseCase) GetAlertSettings(ctx context.Context) ([]domain.WeatherAlertSetting, error) {
+	return u.repo.GetAlertSettings(ctx)
+}
+
+func (u *weatherUseCase) CreateAlertSetting(ctx context.Context, item *domain.WeatherAlertSetting) error {
+	return u.repo.CreateAlertSetting(ctx, item)
+}
+
+func (u *weatherUseCase) UpdateAlertSetting(ctx context.Context, id string, updates map[string]interface{}) (*domain.WeatherAlertSetting, error) {
+	return u.repo.UpdateAlertSetting(ctx, id, updates)
+}
+
+func (u *weatherUseCase) DeleteAlertSetting(ctx context.Context, id string) error {
+	return u.repo.DeleteAlertSetting(ctx, id)
+}
+
+// --- Card Templates ---
+
+func (u *weatherUseCase) GetCardTemplates(ctx context.Context) (map[string]string, error) {
+	return u.repo.GetCardTemplates(ctx)
+}
+
+func (u *weatherUseCase) UpdateCardTemplate(ctx context.Context, severity, backgroundURL, updatedBy string) error {
+	return u.repo.UpdateCardTemplate(ctx, severity, backgroundURL, updatedBy)
+}
+
+// --- Station Metadata & Custom Aliases ---
+
+func (u *weatherUseCase) GetStationMetadata(ctx context.Context, serial string) (*domain.WeatherStationMetadata, error) {
+	return u.repo.GetStationMetadata(ctx, serial)
+}
+
+func (u *weatherUseCase) UpsertStationMetadata(ctx context.Context, meta *domain.WeatherStationMetadata) error {
+	return u.repo.UpsertStationMetadata(ctx, meta)
+}
+
+func (u *weatherUseCase) GetStationHistory(ctx context.Context, serial, rangeType, date, startDate, endDate string) ([]domain.TelemetryHistoryRecord, error) {
+	var imei string
+	sensor, err := u.GetSensorBySerial(ctx, serial)
+	if err == nil && sensor != nil {
+		imei = sensor.HardwareIMEI
+	}
+
+	return u.repo.FetchStationHistory(ctx, serial, imei, rangeType, date, startDate, endDate)
+}
+
+func (u *weatherUseCase) DispatchTestAlert(ctx context.Context, subdistrict, district, severity, imageURL string) (int, error) {
+	alertServiceURL := os.Getenv("ALERT_SERVICE_URL")
+	if alertServiceURL == "" {
+		alertServiceURL = "http://127.0.0.1:8089"
+	}
+
+	payloadBytes, err := json.Marshal(map[string]string{
+		"subdistrict": subdistrict,
+		"district":    district,
+		"severity":    severity,
+		"image_url":   imageURL,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("failed to encode test alert payload: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", alertServiceURL+"/api/v1/alert/test", bytes.NewBuffer(payloadBytes))
+	if err != nil {
+		return 0, fmt.Errorf("failed to create request to alert microservice: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("failed to call alert microservice at %s: %w", alertServiceURL, err)
+	}
+	defer resp.Body.Close()
+
+	var res struct {
+		Success bool   `json:"success"`
+		SentTo  int    `json:"sent_to"`
+		Error   string `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+		return 0, fmt.Errorf("failed to decode alert microservice response: %w", err)
+	}
+
+	if !res.Success {
+		return 0, fmt.Errorf("alert microservice returned error: %s", res.Error)
+	}
+
+	return res.SentTo, nil
 }

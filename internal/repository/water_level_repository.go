@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -19,6 +20,8 @@ import (
 
 	"github.com/redis/go-redis/v9"
 	"golang.org/x/sync/singleflight"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 const (
@@ -35,16 +38,29 @@ type WaterLevelRepository interface {
 	FetchGatewayDevices(ctx context.Context) ([]domain.GatewayRiverDevice, error)
 	FetchGatewayDeviceDetail(ctx context.Context, serial string) (*domain.GatewayDeviceDetailEnvelope, error)
 	FetchGatewayDeviceHistory(ctx context.Context, serial string, timeframe int) ([]domain.GatewayHistoryPoint, error)
+	FetchGatewayDeviceHistoryRange(ctx context.Context, serial, startDate, endDate string) ([]domain.GatewayHistoryPoint, error)
 	FetchGatewaySnapshots(ctx context.Context, serial, date string) ([]domain.GatewaySnapshotLog, error)
 	InitGatewayStream(ctx context.Context, serial string) (*domain.WaterStreamResult, error)
 	TerminateGatewayStream(ctx context.Context, serial string) error
 	FetchActiveAlerts(ctx context.Context) ([]domain.GatewayAlertItem, error)
 	RelayWebRTCOffer(ctx context.Context, serial, sdpOffer string) (string, error)
+	UpdateGatewayDeviceThresholds(ctx context.Context, serial string, req *domain.UpdateStationThresholdsRequest) error
+
+	// Persistent Metadata & Alert Settings
+	UpsertRiverStationMetadata(ctx context.Context, meta *domain.RiverStationMetadata) error
+	GetAllRiverStationMetadata(ctx context.Context) (map[string]domain.RiverStationMetadata, error)
+	GetAlertSettings(ctx context.Context) ([]domain.WeatherAlertSetting, error)
+	CreateAlertSetting(ctx context.Context, item *domain.WeatherAlertSetting) error
+	UpdateAlertSetting(ctx context.Context, id string, updates map[string]interface{}) (*domain.WeatherAlertSetting, error)
+	DeleteAlertSetting(ctx context.Context, id string) error
+	GetCardTemplates(ctx context.Context) (map[string]string, error)
+	UpdateCardTemplate(ctx context.Context, severity, backgroundURL, updatedBy string) error
 }
 
 type waterLevelRepository struct {
 	cfg        *config.Config
 	rdb        *redis.Client
+	db         *gorm.DB
 	httpClient *http.Client
 	sf         singleflight.Group
 
@@ -57,10 +73,11 @@ type waterLevelRepository struct {
 	l1AlertsCachedAt time.Time
 }
 
-func NewWaterLevelRepository(cfg *config.Config, rdb *redis.Client) WaterLevelRepository {
+func NewWaterLevelRepository(cfg *config.Config, rdb *redis.Client, db *gorm.DB) WaterLevelRepository {
 	return &waterLevelRepository{
 		cfg: cfg,
 		rdb: rdb,
+		db:  db,
 		httpClient: &http.Client{
 			Timeout: 8 * time.Second,
 			Transport: &http.Transport{
@@ -253,6 +270,34 @@ func (r *waterLevelRepository) FetchGatewayDeviceHistory(ctx context.Context, se
 
 	path := fmt.Sprintf("/api/v1/river/devices/%s/stats?start=%s&end=%s",
 		url.PathEscape(serial), url.QueryEscape(startTime), url.QueryEscape(endTime))
+	req, err := r.buildGatewayRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := r.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("gateway error %d: %s", resp.StatusCode, string(body))
+	}
+
+	var points []domain.GatewayHistoryPoint
+	if err := json.NewDecoder(resp.Body).Decode(&points); err != nil {
+		return nil, err
+	}
+	return points, nil
+}
+
+func (r *waterLevelRepository) FetchGatewayDeviceHistoryRange(ctx context.Context, serial, startDate, endDate string) ([]domain.GatewayHistoryPoint, error) {
+	q := url.Values{}
+	q.Set("start", startDate)
+	q.Set("end", endDate)
+	path := fmt.Sprintf("/api/v1/river/devices/%s/stats?%s", url.PathEscape(serial), q.Encode())
 	req, err := r.buildGatewayRequest(ctx, http.MethodGet, path, nil)
 	if err != nil {
 		return nil, err
@@ -479,4 +524,162 @@ func (r *waterLevelRepository) RelayWebRTCOffer(ctx context.Context, serial, sdp
 		return "", err
 	}
 	return string(sdpAnswer), nil
+}
+
+func (r *waterLevelRepository) UpdateGatewayDeviceThresholds(ctx context.Context, serial string, req *domain.UpdateStationThresholdsRequest) error {
+	body, err := json.Marshal(req)
+	if err != nil {
+		return fmt.Errorf("marshal thresholds request: %w", err)
+	}
+
+	path := fmt.Sprintf("/api/v1/river/devices/%s/thresholds", url.PathEscape(serial))
+	httpReq, err := r.buildGatewayRequest(ctx, http.MethodPut, path, body)
+	if err != nil {
+		return err
+	}
+
+	resp, err := r.httpClient.Do(httpReq)
+	if err != nil {
+		return fmt.Errorf("update thresholds gateway call failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("gateway returned status %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	// Invalidate local memory and Redis caches
+	r.l1Mu.Lock()
+	r.l1Cache = nil
+	r.l1Mu.Unlock()
+
+	if r.rdb != nil {
+		_ = r.rdb.Del(ctx, redisKeyWaterStationsAll).Err()
+	}
+
+	return nil
+}
+
+// --- Persistent River Station Metadata ---
+
+func (r *waterLevelRepository) UpsertRiverStationMetadata(ctx context.Context, meta *domain.RiverStationMetadata) error {
+	if r.db == nil || meta == nil || meta.Serial == "" {
+		return nil
+	}
+	meta.UpdatedAt = time.Now()
+	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "serial"}},
+		DoUpdates: clause.AssignmentColumns([]string{"subdistrict", "district", "latitude", "longitude", "updated_at"}),
+	}).Create(meta).Error
+}
+
+func (r *waterLevelRepository) GetAllRiverStationMetadata(ctx context.Context) (map[string]domain.RiverStationMetadata, error) {
+	result := make(map[string]domain.RiverStationMetadata)
+	if r.db == nil {
+		return result, nil
+	}
+	var list []domain.RiverStationMetadata
+	if err := r.db.WithContext(ctx).Find(&list).Error; err != nil {
+		return result, err
+	}
+	for _, item := range list {
+		result[item.Serial] = item
+	}
+	return result, nil
+}
+
+// --- River/Water Level Alert Notification Settings CRUD ---
+
+func (r *waterLevelRepository) GetAlertSettings(ctx context.Context) ([]domain.WeatherAlertSetting, error) {
+	if r.db == nil {
+		return nil, fmt.Errorf("database connection unavailable")
+	}
+	var settings []domain.WeatherAlertSetting
+	err := r.db.WithContext(ctx).Where("module_key = ?", "water_level").Order("created_at DESC").Find(&settings).Error
+	return settings, err
+}
+
+func (r *waterLevelRepository) CreateAlertSetting(ctx context.Context, item *domain.WeatherAlertSetting) error {
+	if r.db == nil {
+		return fmt.Errorf("database connection unavailable")
+	}
+	if item.ID == "" {
+		item.ID = fmt.Sprintf("WTR-%03d", time.Now().UnixNano()%1000)
+	}
+	item.ModuleKey = "water_level"
+	item.CreatedAt = time.Now()
+	item.UpdatedAt = time.Now()
+	return r.db.WithContext(ctx).Create(item).Error
+}
+
+func (r *waterLevelRepository) UpdateAlertSetting(ctx context.Context, id string, updates map[string]interface{}) (*domain.WeatherAlertSetting, error) {
+	if r.db == nil {
+		return nil, fmt.Errorf("database connection unavailable")
+	}
+	updates["updated_at"] = time.Now()
+	var setting domain.WeatherAlertSetting
+	if err := r.db.WithContext(ctx).Where("id = ? AND module_key = ?", id, "water_level").First(&setting).Error; err != nil {
+		return nil, err
+	}
+	if err := r.db.WithContext(ctx).Model(&setting).Updates(updates).Error; err != nil {
+		return nil, err
+	}
+	r.db.WithContext(ctx).Where("id = ? AND module_key = ?", id, "water_level").First(&setting)
+	return &setting, nil
+}
+
+func (r *waterLevelRepository) DeleteAlertSetting(ctx context.Context, id string) error {
+	if r.db == nil {
+		return fmt.Errorf("database connection unavailable")
+	}
+	return r.db.WithContext(ctx).Where("id = ? AND module_key = ?", id, "water_level").Delete(&domain.WeatherAlertSetting{}).Error
+}
+
+// --- River Card Templates Management ---
+
+func (r *waterLevelRepository) GetCardTemplates(ctx context.Context) (map[string]string, error) {
+	minioBase := os.Getenv("MINIO_PUBLIC_BASE_URL")
+	if minioBase == "" {
+		minioBase = "https://uat-super-app-chonburi-api.mueangsmart.com"
+	}
+	bucket := os.Getenv("MINIO_BUCKET")
+	if bucket == "" {
+		bucket = "super-app-assets"
+	}
+	baseURL := fmt.Sprintf("%s/%s/weather-templates", strings.TrimRight(minioBase, "/"), bucket)
+
+	result := map[string]string{
+		"info":    fmt.Sprintf("%s/bg_info_cinematic.jpg", baseURL),
+		"warning": fmt.Sprintf("%s/bg_warning_cinematic.jpg", baseURL),
+		"danger":  fmt.Sprintf("%s/bg_danger_cinematic.jpg", baseURL),
+	}
+	if r.db == nil {
+		return result, nil
+	}
+	var templates []domain.WaterCardTemplate
+	if err := r.db.WithContext(ctx).Find(&templates).Error; err == nil {
+		for _, t := range templates {
+			if t.BackgroundURL != "" {
+				result[t.Severity] = t.BackgroundURL
+			}
+		}
+	}
+	return result, nil
+}
+
+func (r *waterLevelRepository) UpdateCardTemplate(ctx context.Context, severity, backgroundURL, updatedBy string) error {
+	if r.db == nil {
+		return fmt.Errorf("database connection unavailable")
+	}
+	template := domain.WaterCardTemplate{
+		Severity:      severity,
+		BackgroundURL: backgroundURL,
+		UpdatedBy:     updatedBy,
+		UpdatedAt:     time.Now(),
+	}
+	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "severity"}},
+		DoUpdates: clause.AssignmentColumns([]string{"background_url", "updated_by", "updated_at"}),
+	}).Create(&template).Error
 }

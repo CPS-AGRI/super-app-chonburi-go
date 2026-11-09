@@ -2,6 +2,7 @@ package repository
 
 import (
 	"errors"
+	"math"
 	"super-app-chonburi-go/internal/domain"
 	"time"
 
@@ -21,19 +22,23 @@ func (r *publicRelationRepository) GetDashboardStats(moduleId string) (*domain.P
 	now := time.Now()
 
 	r.db.Model(&domain.PublicRelation{}).
-		Where("module_id = ? AND status = ? AND start_date <= ? AND end_date >= ?", moduleId, "Published", now, now).
+		Where("module_id = ? AND LOWER(status) IN ('published', 'active') AND (start_date IS NULL OR start_date <= ?) AND (end_date IS NULL OR end_date >= ?)", moduleId, now, now).
 		Count(&stats.ActiveNewsCount)
 
-	type AvgResult struct {
-		Avg float64
+	type ViewStatsResult struct {
+		Total int64   `gorm:"column:total"`
+		Avg   float64 `gorm:"column:avg"`
 	}
-	var avgResult AvgResult
+	var viewStats ViewStatsResult
 	r.db.Raw(`
-		SELECT COALESCE(AVG(count), 0) as avg 
+		SELECT 
+			COALESCE(SUM(vc.count), 0) as total,
+			COALESCE(AVG(vc.count), 0) as avg 
 		FROM module_public_relation_visitor_count vc
 		JOIN module_public_relations pr ON pr.id = vc.module_public_relation_id
-		WHERE pr.module_id = ?`, moduleId).Scan(&avgResult)
-	stats.AverageViewers = int64(avgResult.Avg)
+		WHERE pr.module_id = ?`, moduleId).Scan(&viewStats)
+	stats.TotalViewsCount = viewStats.Total
+	stats.AverageViewers = int64(math.Round(viewStats.Avg))
 
 	r.db.Model(&domain.PublicRelation{}).Where("module_id = ?", moduleId).Count(&stats.TotalNewsCount)
 
@@ -370,6 +375,15 @@ func (r *publicRelationRepository) GetWelcomeScreens() ([]domain.MunicipalityWel
 	var screens []domain.MunicipalityWelcomeScreen
 	err := r.db.Order("created_date DESC").Find(&screens).Error
 	return screens, err
+}
+
+func (r *publicRelationRepository) GetWelcomeScreenByID(id string) (*domain.MunicipalityWelcomeScreen, error) {
+	var screen domain.MunicipalityWelcomeScreen
+	err := r.db.Where("id = ?", id).First(&screen).Error
+	if err != nil {
+		return nil, err
+	}
+	return &screen, nil
 }
 
 func (r *publicRelationRepository) CreateWelcomeScreen(screen *domain.MunicipalityWelcomeScreen) error {
