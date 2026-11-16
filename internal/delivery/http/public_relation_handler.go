@@ -1,6 +1,7 @@
 package http
 
 import (
+	"errors"
 	"log"
 	"strconv"
 	"super-app-chonburi-go/internal/domain"
@@ -223,6 +224,9 @@ func (h *PublicRelationHandler) HideComment(c fiber.Ctx) error {
 	}
 
 	if err := h.uc.HideComment(moduleId, prId, commentId, userClaims.ID); err != nil {
+		if errors.Is(err, domain.ErrPRCommentNotFound) {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": err.Error()})
+		}
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
 
@@ -239,6 +243,9 @@ func (h *PublicRelationHandler) ShowComment(c fiber.Ctx) error {
 	}
 
 	if err := h.uc.ShowComment(moduleId, prId, commentId, userClaims.ID); err != nil {
+		if errors.Is(err, domain.ErrPRCommentNotFound) {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": err.Error()})
+		}
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
 

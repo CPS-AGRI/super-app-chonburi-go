@@ -26,8 +26,25 @@ func (h *AdminHandler) RegisterRoutes(router fiber.Router) {
 }
 
 func (h *AdminHandler) GetAdmins(c fiber.Ctx) error {
-	pageNumber, _ := strconv.Atoi(c.Query("page_number", "1"))
-	pageSize, _ := strconv.Atoi(c.Query("page_size", "20"))
+	pageNumberStr := c.Query("page_number")
+	if pageNumberStr == "" {
+		pageNumberStr = c.Query("pageNumber", "1")
+	}
+	pageNumber, _ := strconv.Atoi(pageNumberStr)
+	if pageNumber <= 0 {
+		pageNumber = 1
+	}
+
+	pageSizeStr := c.Query("page_size")
+	if pageSizeStr == "" {
+		pageSizeStr = c.Query("pageSize", "20")
+	}
+	pageSize, _ := strconv.Atoi(pageSizeStr)
+	if pageSize <= 0 {
+		pageSize = 20
+	} else if pageSize > 1000 {
+		pageSize = 1000
+	}
 
 	query := domain.AdminQuery{
 		PageNumber: pageNumber,

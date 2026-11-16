@@ -1,10 +1,13 @@
 package domain
 
 import (
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
 )
+
+var ErrPRCommentNotFound = errors.New("comment not found")
 
 type PublicRelation struct {
 	ID            uuid.UUID `gorm:"type:uuid;primaryKey;column:id" json:"id"`

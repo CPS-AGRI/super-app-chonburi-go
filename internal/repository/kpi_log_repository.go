@@ -17,7 +17,234 @@ type kpiLogRepository struct {
 }
 
 func NewKPILogRepository(db *gorm.DB) domain.KPILogRepository {
+	// High-Performance & Resilient Schema Migration
+	// Ensure kpi_activity_logs has required columns and optimal performance indexes
+	if err := db.Exec(`
+		ALTER TABLE kpi_activity_logs 
+		  ADD COLUMN IF NOT EXISTS from_status VARCHAR(50),
+		  ADD COLUMN IF NOT EXISTS to_status VARCHAR(50);
+		CREATE INDEX IF NOT EXISTS idx_kpi_activity_logs_perf 
+		  ON kpi_activity_logs(module_key, event_code, created_date);
+		CREATE INDEX IF NOT EXISTS idx_kpi_activity_logs_entity 
+		  ON kpi_activity_logs(module_key, entity_id, event_code);
+	`).Error; err != nil {
+		log.Printf("[KPI] Warning: failed to auto-migrate kpi_activity_logs columns/indexes: %v", err)
+	}
 	return &kpiLogRepository{db: db}
+}
+
+// complaintKPIEventsCTE builds a shared PostgreSQL WITH clause that merges persisted
+// kpi_activity_logs rows with live operational events derived from module_complaints
+// and module_complaint_activities so historical or unlogged transitions still reflect
+// accurately in Executive dashboards, leaderboards, and scorecards without duplicates.
+func complaintKPIEventsCTE(moduleKey string) string {
+	baseSelect := `
+		SELECT
+			module_key,
+			department_id,
+			entity_id,
+			document_number,
+			actor_id,
+			target_user_id,
+			event_code,
+			from_status,
+			to_status,
+			step_duration_seconds,
+			sla_target_seconds,
+			is_sla_breached,
+			breach_duration_seconds,
+			metadata,
+			created_date
+		FROM kpi_activity_logs`
+
+	includeLiveComplaints := moduleKey == "" || moduleKey == domain.ModuleKeyComplaint
+	if !includeLiveComplaints {
+		return fmt.Sprintf(`WITH complaint_kpi_events AS (%s)`, baseSelect)
+	}
+
+	uuidPattern := `^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`
+	return fmt.Sprintf(`WITH live_complaints AS (
+		SELECT
+			mc.id,
+			mc.document_id,
+			mc.department_id,
+			mc.assigner_id,
+			mc.assignee_id,
+			mc.status,
+			mc.created_date,
+			mc.updated_date,
+			fwd.actor_id AS fwd_actor_id,
+			fwd.created_date AS fwd_at,
+			asg.actor_id AS asg_actor_id,
+			asg.created_date AS asg_at,
+			cmp.actor_id AS cmp_actor_id,
+			cmp.created_date AS cmp_at,
+			rej.actor_id AS rej_actor_id,
+			rej.created_date AS rej_at,
+			rej.description AS rej_reason
+		FROM module_complaints mc
+		LEFT JOIN LATERAL (
+			SELECT
+				CASE WHEN act.created_by ~* '%s' THEN act.created_by::uuid ELSE NULL::uuid END AS actor_id,
+				act.created_date
+			FROM module_complaint_activities act
+			WHERE act.module_complaint_id = mc.id AND act.status = 'received'
+			ORDER BY act.created_date ASC
+			LIMIT 1
+		) fwd ON true
+		LEFT JOIN LATERAL (
+			SELECT
+				CASE WHEN act.created_by ~* '%s' THEN act.created_by::uuid ELSE NULL::uuid END AS actor_id,
+				act.created_date
+			FROM module_complaint_activities act
+			WHERE act.module_complaint_id = mc.id AND (act.status = 'in_progress' OR act.description LIKE '%%มอบหมาย%%')
+			ORDER BY act.created_date ASC
+			LIMIT 1
+		) asg ON true
+		LEFT JOIN LATERAL (
+			SELECT
+				CASE WHEN act.created_by ~* '%s' THEN act.created_by::uuid ELSE NULL::uuid END AS actor_id,
+				act.created_date
+			FROM module_complaint_activities act
+			WHERE act.module_complaint_id = mc.id AND act.status = 'completed'
+			ORDER BY act.created_date DESC
+			LIMIT 1
+		) cmp ON true
+		LEFT JOIN LATERAL (
+			SELECT
+				CASE WHEN act.created_by ~* '%s' THEN act.created_by::uuid ELSE NULL::uuid END AS actor_id,
+				act.created_date,
+				act.description
+			FROM module_complaint_activities act
+			WHERE act.module_complaint_id = mc.id AND act.status = 'rejected'
+			ORDER BY act.created_date DESC
+			LIMIT 1
+		) rej ON true
+	),
+	complaint_kpi_events AS (%s
+		UNION ALL
+		SELECT
+			'complaint'::varchar(50) AS module_key,
+			lc.department_id::uuid AS department_id,
+			lc.id::uuid AS entity_id,
+			lc.document_id::varchar(100) AS document_number,
+			lc.fwd_actor_id::uuid AS actor_id,
+			NULL::uuid AS target_user_id,
+			'COMPLAINT_CENTER_FORWARDED'::varchar(60) AS event_code,
+			'pending'::varchar(50) AS from_status,
+			'received'::varchar(50) AS to_status,
+			GREATEST(EXTRACT(EPOCH FROM (lc.fwd_at - lc.created_date))::bigint, 0) AS step_duration_seconds,
+			86400::bigint AS sla_target_seconds,
+			(GREATEST(EXTRACT(EPOCH FROM (lc.fwd_at - lc.created_date))::bigint, 0) > 86400) AS is_sla_breached,
+			GREATEST(EXTRACT(EPOCH FROM (lc.fwd_at - lc.created_date))::bigint - 86400, 0) AS breach_duration_seconds,
+			'{}'::jsonb AS metadata,
+			lc.fwd_at AS created_date
+		FROM live_complaints lc
+		WHERE lc.department_id IS NOT NULL
+			AND lc.fwd_at IS NOT NULL
+			AND lc.fwd_actor_id IS NOT NULL
+			AND NOT EXISTS (
+				SELECT 1 FROM kpi_activity_logs kl
+				WHERE kl.module_key = 'complaint' AND kl.entity_id = lc.id AND kl.event_code = 'COMPLAINT_CENTER_FORWARDED'
+			)
+		UNION ALL
+		SELECT
+			'complaint'::varchar(50) AS module_key,
+			lc.department_id::uuid AS department_id,
+			lc.id::uuid AS entity_id,
+			lc.document_id::varchar(100) AS document_number,
+			COALESCE(lc.assigner_id, lc.asg_actor_id)::uuid AS actor_id,
+			lc.assignee_id::uuid AS target_user_id,
+			'COMPLAINT_MANAGER_ASSIGNED'::varchar(60) AS event_code,
+			'received'::varchar(50) AS from_status,
+			'in_progress'::varchar(50) AS to_status,
+			GREATEST(EXTRACT(EPOCH FROM (COALESCE(lc.asg_at, lc.updated_date, lc.created_date) - lc.created_date))::bigint, 0) AS step_duration_seconds,
+			86400::bigint AS sla_target_seconds,
+			(GREATEST(EXTRACT(EPOCH FROM (COALESCE(lc.asg_at, lc.updated_date, lc.created_date) - lc.created_date))::bigint, 0) > 86400) AS is_sla_breached,
+			GREATEST(EXTRACT(EPOCH FROM (COALESCE(lc.asg_at, lc.updated_date, lc.created_date) - lc.created_date))::bigint - 86400, 0) AS breach_duration_seconds,
+			'{}'::jsonb AS metadata,
+			COALESCE(lc.asg_at, lc.updated_date, lc.created_date) AS created_date
+		FROM live_complaints lc
+		WHERE (lc.assignee_id IS NOT NULL OR lc.assigner_id IS NOT NULL)
+			AND COALESCE(lc.assigner_id, lc.asg_actor_id) IS NOT NULL
+			AND NOT EXISTS (
+				SELECT 1 FROM kpi_activity_logs kl
+				WHERE kl.module_key = 'complaint' AND kl.entity_id = lc.id AND kl.event_code = 'COMPLAINT_MANAGER_ASSIGNED'
+			)
+		UNION ALL
+		SELECT
+			'complaint'::varchar(50) AS module_key,
+			lc.department_id::uuid AS department_id,
+			lc.id::uuid AS entity_id,
+			lc.document_id::varchar(100) AS document_number,
+			lc.assignee_id::uuid AS actor_id,
+			lc.assignee_id::uuid AS target_user_id,
+			'COMPLAINT_STAFF_ACKNOWLEDGED'::varchar(60) AS event_code,
+			'received'::varchar(50) AS from_status,
+			'in_progress'::varchar(50) AS to_status,
+			GREATEST(EXTRACT(EPOCH FROM (COALESCE(lc.asg_at, lc.updated_date, lc.created_date) - lc.created_date))::bigint, 0) AS step_duration_seconds,
+			0::bigint AS sla_target_seconds,
+			false AS is_sla_breached,
+			0::bigint AS breach_duration_seconds,
+			'{}'::jsonb AS metadata,
+			COALESCE(lc.asg_at, lc.updated_date, lc.created_date) AS created_date
+		FROM live_complaints lc
+		WHERE lc.assignee_id IS NOT NULL
+			AND lc.status IN ('in_progress', 'completed')
+			AND NOT EXISTS (
+				SELECT 1 FROM kpi_activity_logs kl
+				WHERE kl.module_key = 'complaint' AND kl.entity_id = lc.id
+				AND kl.event_code IN ('COMPLAINT_STAFF_ACKNOWLEDGED', 'COMPLAINT_STAFF_ACCEPTED')
+			)
+		UNION ALL
+		SELECT
+			'complaint'::varchar(50) AS module_key,
+			lc.department_id::uuid AS department_id,
+			lc.id::uuid AS entity_id,
+			lc.document_id::varchar(100) AS document_number,
+			COALESCE(lc.assignee_id, lc.cmp_actor_id)::uuid AS actor_id,
+			COALESCE(lc.assignee_id, lc.cmp_actor_id)::uuid AS target_user_id,
+			'COMPLAINT_STAFF_RESOLVED'::varchar(60) AS event_code,
+			'in_progress'::varchar(50) AS from_status,
+			'completed'::varchar(50) AS to_status,
+			GREATEST(EXTRACT(EPOCH FROM (COALESCE(lc.cmp_at, lc.updated_date, lc.created_date) - COALESCE(lc.asg_at, lc.created_date)))::bigint, 0) AS step_duration_seconds,
+			259200::bigint AS sla_target_seconds,
+			(GREATEST(EXTRACT(EPOCH FROM (COALESCE(lc.cmp_at, lc.updated_date, lc.created_date) - COALESCE(lc.asg_at, lc.created_date)))::bigint, 0) > 259200) AS is_sla_breached,
+			GREATEST(EXTRACT(EPOCH FROM (COALESCE(lc.cmp_at, lc.updated_date, lc.created_date) - COALESCE(lc.asg_at, lc.created_date)))::bigint - 259200, 0) AS breach_duration_seconds,
+			'{}'::jsonb AS metadata,
+			COALESCE(lc.cmp_at, lc.updated_date, lc.created_date) AS created_date
+		FROM live_complaints lc
+		WHERE lc.status = 'completed'
+			AND COALESCE(lc.assignee_id, lc.cmp_actor_id) IS NOT NULL
+			AND NOT EXISTS (
+				SELECT 1 FROM kpi_activity_logs kl
+				WHERE kl.module_key = 'complaint' AND kl.entity_id = lc.id AND kl.event_code = 'COMPLAINT_STAFF_RESOLVED'
+			)
+		UNION ALL
+		SELECT
+			'complaint'::varchar(50) AS module_key,
+			lc.department_id::uuid AS department_id,
+			lc.id::uuid AS entity_id,
+			lc.document_id::varchar(100) AS document_number,
+			COALESCE(lc.rej_actor_id, lc.assigner_id)::uuid AS actor_id,
+			NULL::uuid AS target_user_id,
+			'COMPLAINT_DEPT_RETURNED'::varchar(60) AS event_code,
+			'received'::varchar(50) AS from_status,
+			'rejected'::varchar(50) AS to_status,
+			GREATEST(EXTRACT(EPOCH FROM (COALESCE(lc.rej_at, lc.updated_date, lc.created_date) - lc.created_date))::bigint, 0) AS step_duration_seconds,
+			86400::bigint AS sla_target_seconds,
+			(GREATEST(EXTRACT(EPOCH FROM (COALESCE(lc.rej_at, lc.updated_date, lc.created_date) - lc.created_date))::bigint, 0) > 86400) AS is_sla_breached,
+			GREATEST(EXTRACT(EPOCH FROM (COALESCE(lc.rej_at, lc.updated_date, lc.created_date) - lc.created_date))::bigint - 86400, 0) AS breach_duration_seconds,
+			jsonb_build_object('reason', COALESCE(lc.rej_reason, '')) AS metadata,
+			COALESCE(lc.rej_at, lc.updated_date, lc.created_date) AS created_date
+		FROM live_complaints lc
+		WHERE (lc.status = 'rejected' OR lc.rej_at IS NOT NULL)
+			AND COALESCE(lc.rej_actor_id, lc.assigner_id) IS NOT NULL
+			AND NOT EXISTS (
+				SELECT 1 FROM kpi_activity_logs kl
+				WHERE kl.module_key = 'complaint' AND kl.entity_id = lc.id AND kl.event_code = 'COMPLAINT_DEPT_RETURNED'
+			)
+	)`, uuidPattern, uuidPattern, uuidPattern, uuidPattern, baseSelect)
 }
 
 func (r *kpiLogRepository) Create(log *domain.KPILog) error {
@@ -339,37 +566,37 @@ func (r *kpiLogRepository) GetKPISummary(filter domain.KPIQueryFilter) (*domain.
 			AdminVerifiedCount     int64   `gorm:"column:admin_verified_count"`
 		}
 		var raw verifySummaryRaw
-		q := r.db.Table("user_informations").
+		q := applyActiveUserVerificationScope(r.db.Table("user_informations")).
 			Select(`
 				COUNT(*) as total_requests,
-				COUNT(CASE WHEN verification_status = 'verified' THEN 1 END) as approved_count,
-				COUNT(CASE WHEN verification_status = 'rejected' THEN 1 END) as rejected_count,
-				COUNT(CASE WHEN verification_status = 'pending' THEN 1 END) as pending_count,
-				COUNT(CASE WHEN population_type = 'real' THEN 1 END) as real_population_count,
-				COUNT(CASE WHEN population_type = 'latent' THEN 1 END) as latent_population_count,
-				COUNT(CASE WHEN population_type = 'outside' THEN 1 END) as outside_population_count,
-				COUNT(CASE WHEN verified_by_type = 'system' THEN 1 END) as system_verified_count,
-				COUNT(CASE WHEN verified_by_type = 'admin' THEN 1 END) as admin_verified_count,
+				COUNT(CASE WHEN user_informations.verification_status = 'verified' THEN 1 END) as approved_count,
+				COUNT(CASE WHEN user_informations.verification_status = 'rejected' THEN 1 END) as rejected_count,
+				COUNT(CASE WHEN user_informations.verification_status = 'pending' THEN 1 END) as pending_count,
+				COUNT(CASE WHEN user_informations.population_type = 'real' THEN 1 END) as real_population_count,
+				COUNT(CASE WHEN user_informations.population_type = 'latent' THEN 1 END) as latent_population_count,
+				COUNT(CASE WHEN user_informations.population_type = 'outside' THEN 1 END) as outside_population_count,
+				COUNT(CASE WHEN user_informations.verified_by_type = 'system' THEN 1 END) as system_verified_count,
+				COUNT(CASE WHEN user_informations.verified_by_type = 'admin' THEN 1 END) as admin_verified_count,
 				COALESCE(AVG(CASE 
-					WHEN verification_status IN ('verified', 'rejected') 
-					     AND COALESCE(verified_date, updated_date) > created_date 
-					THEN EXTRACT(EPOCH FROM (COALESCE(verified_date, updated_date) - created_date)) 
+					WHEN user_informations.verification_status IN ('verified', 'rejected') 
+					     AND COALESCE(user_informations.verified_date, user_informations.updated_date) > user_informations.created_date 
+					THEN EXTRACT(EPOCH FROM (COALESCE(user_informations.verified_date, user_informations.updated_date) - user_informations.created_date)) 
 				END), 0) as avg_duration_sec
 			`)
 
 		if filter.UserID != "" {
-			q = q.Where("updated_by = ?", filter.UserID)
+			q = q.Where("user_informations.updated_by = ?", filter.UserID)
 		}
 		if filter.DepartmentID != "" {
-			q = q.Where("updated_by IN (SELECT admin_id::text FROM admin_departments WHERE department_id::text = ?)", filter.DepartmentID)
+			q = q.Where("user_informations.updated_by IN (SELECT admin_id::text FROM admin_departments WHERE department_id::text = ?)", filter.DepartmentID)
 		} else if len(filter.DepartmentIDs) > 0 {
-			q = q.Where("updated_by IN (SELECT admin_id::text FROM admin_departments WHERE department_id::text IN (?))", filter.DepartmentIDs)
+			q = q.Where("user_informations.updated_by IN (SELECT admin_id::text FROM admin_departments WHERE department_id::text IN (?))", filter.DepartmentIDs)
 		}
 		if filter.StartDate != nil {
-			q = q.Where("created_date >= ?", filter.StartDate)
+			q = q.Where("user_informations.created_date >= ?", filter.StartDate)
 		}
 		if filter.EndDate != nil {
-			q = q.Where("created_date <= ?", filter.EndDate)
+			q = q.Where("user_informations.created_date <= ?", filter.EndDate)
 		}
 		_ = q.Scan(&raw).Error
 
@@ -624,24 +851,36 @@ func (r *kpiLogRepository) GetKPISummary(filter domain.KPIQueryFilter) (*domain.
 		}, nil
 	}
 
-	query := r.db.Table("kpi_activity_logs")
+	whereClauses := []string{}
+	args := []interface{}{}
 
 	if filter.ModuleKey != "" {
-		query = query.Where("module_key = ?", filter.ModuleKey)
+		whereClauses = append(whereClauses, "k.module_key = ?")
+		args = append(args, filter.ModuleKey)
 	}
 	if filter.DepartmentID != "" {
-		query = query.Where("department_id = ?", filter.DepartmentID)
+		whereClauses = append(whereClauses, "k.department_id = ?")
+		args = append(args, filter.DepartmentID)
 	} else if len(filter.DepartmentIDs) > 0 {
-		query = query.Where("department_id IN (?)", filter.DepartmentIDs)
+		whereClauses = append(whereClauses, "k.department_id IN (?)")
+		args = append(args, filter.DepartmentIDs)
 	}
 	if filter.UserID != "" {
-		query = query.Where("(target_user_id = ? OR actor_id = ?)", filter.UserID, filter.UserID)
+		whereClauses = append(whereClauses, "(k.target_user_id = ? OR k.actor_id = ?)")
+		args = append(args, filter.UserID, filter.UserID)
 	}
 	if filter.StartDate != nil {
-		query = query.Where("created_date >= ?", filter.StartDate)
+		whereClauses = append(whereClauses, "k.created_date >= ?")
+		args = append(args, filter.StartDate)
 	}
 	if filter.EndDate != nil {
-		query = query.Where("created_date <= ?", filter.EndDate)
+		whereClauses = append(whereClauses, "k.created_date <= ?")
+		args = append(args, filter.EndDate)
+	}
+
+	whereSQL := ""
+	if len(whereClauses) > 0 {
+		whereSQL = "WHERE " + strings.Join(whereClauses, " AND ")
 	}
 
 	type summaryRaw struct {
@@ -661,23 +900,27 @@ func (r *kpiLogRepository) GetKPISummary(filter domain.KPIQueryFilter) (*domain.
 	thresholds, _ := r.GetThresholds(filter.ModuleKey)
 	resSeconds := int64(thresholds.ResolutionSLAHours * 3600)
 
-	selectClause := fmt.Sprintf(`
-		COUNT(*) as total_events,
-		COUNT(CASE WHEN event_code = 'COMPLAINT_STAFF_RESOLVED' THEN 1 END) as total_resolved_cases,
-		COUNT(DISTINCT CASE WHEN event_code IN ('COMPLAINT_CENTER_FORWARDED', 'COMPLAINT_MANAGER_ASSIGNED') THEN entity_id END) as total_dispatched,
-		COALESCE(ROUND((AVG(CASE WHEN event_code = 'COMPLAINT_STAFF_RESOLVED' AND step_duration_seconds > 0 THEN step_duration_seconds END) / 3600.0)::numeric, 2), 0) as avg_mttr_hours,
-		COALESCE(ROUND((AVG(CASE WHEN event_code IN ('COMPLAINT_CENTER_FORWARDED', 'COMPLAINT_MANAGER_ASSIGNED') AND step_duration_seconds > 0 THEN step_duration_seconds END) / 3600.0)::numeric, 2), 0) as avg_dispatch_hours,
-		COUNT(CASE WHEN event_code = 'COMPLAINT_STAFF_RESOLVED' AND (is_sla_breached = true OR step_duration_seconds > %d) THEN 1 END) as total_sla_breached_cases,
-		CASE 
-			WHEN COUNT(CASE WHEN event_code = 'COMPLAINT_STAFF_RESOLVED' THEN 1 END) > 0 
-			THEN ROUND((1.0 - (COUNT(CASE WHEN event_code = 'COMPLAINT_STAFF_RESOLVED' AND (is_sla_breached = true OR step_duration_seconds > %d) THEN 1 END)::numeric / COUNT(CASE WHEN event_code = 'COMPLAINT_STAFF_RESOLVED' THEN 1 END)::numeric)) * 100.0, 2)
-			ELSE 100.0 
-		END as sla_compliance_rate,
-		COALESCE(AVG(CASE WHEN event_code = 'COMPLAINT_CITIZEN_RATED' AND (metadata->>'rating') ~ '^[0-9]+$' THEN (metadata->>'rating')::numeric END), 0) as avg_citizen_rating,
-		COUNT(CASE WHEN event_code = 'COMPLAINT_CITIZEN_DISPUTED' THEN 1 END) as total_disputes
-	`, resSeconds, resSeconds)
+	summarySQL := fmt.Sprintf(`
+		%s
+		SELECT
+			COUNT(DISTINCT k.entity_id) as total_events,
+			COUNT(DISTINCT CASE WHEN k.event_code = 'COMPLAINT_STAFF_RESOLVED' THEN k.entity_id END) as total_resolved_cases,
+			COUNT(DISTINCT CASE WHEN k.event_code IN ('COMPLAINT_CENTER_FORWARDED', 'COMPLAINT_MANAGER_ASSIGNED') THEN k.entity_id END) as total_dispatched,
+			COALESCE(ROUND((AVG(CASE WHEN k.event_code = 'COMPLAINT_STAFF_RESOLVED' AND k.step_duration_seconds > 0 THEN k.step_duration_seconds END) / 3600.0)::numeric, 2), 0) as avg_mttr_hours,
+			COALESCE(ROUND((AVG(CASE WHEN k.event_code IN ('COMPLAINT_CENTER_FORWARDED', 'COMPLAINT_MANAGER_ASSIGNED') AND k.step_duration_seconds > 0 THEN k.step_duration_seconds END) / 3600.0)::numeric, 2), 0) as avg_dispatch_hours,
+			COUNT(DISTINCT CASE WHEN k.event_code = 'COMPLAINT_STAFF_RESOLVED' AND (k.is_sla_breached = true OR k.step_duration_seconds > %d) THEN k.entity_id END) as total_sla_breached_cases,
+			CASE 
+				WHEN COUNT(DISTINCT CASE WHEN k.event_code = 'COMPLAINT_STAFF_RESOLVED' THEN k.entity_id END) > 0 
+				THEN ROUND((1.0 - (COUNT(DISTINCT CASE WHEN k.event_code = 'COMPLAINT_STAFF_RESOLVED' AND (k.is_sla_breached = true OR k.step_duration_seconds > %d) THEN k.entity_id END)::numeric / COUNT(DISTINCT CASE WHEN k.event_code = 'COMPLAINT_STAFF_RESOLVED' THEN k.entity_id END)::numeric)) * 100.0, 2)
+				ELSE 100.0 
+			END as sla_compliance_rate,
+			COALESCE(AVG(CASE WHEN k.event_code = 'COMPLAINT_CITIZEN_RATED' AND (k.metadata->>'rating') ~ '^[0-9]+$' THEN (k.metadata->>'rating')::numeric END), 0) as avg_citizen_rating,
+			COUNT(DISTINCT CASE WHEN k.event_code = 'COMPLAINT_CITIZEN_DISPUTED' THEN k.entity_id END) as total_disputes
+		FROM complaint_kpi_events k
+		%s
+	`, complaintKPIEventsCTE(filter.ModuleKey), resSeconds, resSeconds, whereSQL)
 
-	if err := query.Select(selectClause).Scan(&raw).Error; err != nil {
+	if err := r.db.Raw(summarySQL, args...).Scan(&raw).Error; err != nil {
 		return nil, err
 	}
 
@@ -1090,6 +1333,7 @@ func (r *kpiLogRepository) GetStaffLeaderboard(filter domain.KPIQueryFilter) ([]
 	resSeconds := int64(thresholds.ResolutionSLAHours * 3600)
 
 	sql := fmt.Sprintf(`
+		%s
 		SELECT 
 			k.target_user_id::text as user_id,
 			COALESCE(a.name, 'เจ้าหน้าที่') as name,
@@ -1103,7 +1347,7 @@ func (r *kpiLogRepository) GetStaffLeaderboard(filter domain.KPIQueryFilter) ([]
 				WHERE ad.admin_id = k.target_user_id 
 				LIMIT 1
 			), MAX(d.name), '-') as department_name,
-			COUNT(DISTINCT CASE WHEN k.event_code IN ('COMPLAINT_MANAGER_ASSIGNED', 'COMPLAINT_STAFF_ACCEPTED', 'COMPLAINT_STAFF_RESOLVED') THEN k.entity_id END) as total_assigned,
+			COUNT(DISTINCT CASE WHEN k.event_code IN ('COMPLAINT_MANAGER_ASSIGNED', 'COMPLAINT_STAFF_ACCEPTED', 'COMPLAINT_STAFF_ACKNOWLEDGED', 'COMPLAINT_STAFF_RESOLVED') THEN k.entity_id END) as total_assigned,
 			COUNT(DISTINCT CASE WHEN k.event_code = 'COMPLAINT_STAFF_RESOLVED' THEN k.entity_id END) as total_resolved,
 			COALESCE(ROUND((AVG(CASE WHEN k.event_code = 'COMPLAINT_STAFF_RESOLVED' AND k.step_duration_seconds > 0 THEN k.step_duration_seconds END) / 3600.0)::numeric, 1), 0) as avg_mttr_hours,
 			CASE 
@@ -1113,7 +1357,7 @@ func (r *kpiLogRepository) GetStaffLeaderboard(filter domain.KPIQueryFilter) ([]
 			END as sla_compliance_rate,
 			COALESCE(ROUND(AVG(CASE WHEN k.event_code = 'COMPLAINT_CITIZEN_RATED' AND (k.metadata->>'rating') ~ '^[0-9]+$' THEN (k.metadata->>'rating')::numeric END), 2), 0) as avg_rating,
 			COUNT(CASE WHEN k.event_code = 'COMPLAINT_CITIZEN_DISPUTED' THEN 1 END) as dispute_count
-		FROM kpi_activity_logs k
+		FROM complaint_kpi_events k
 		LEFT JOIN admin_users a ON a.id = k.target_user_id
 		LEFT JOIN admin_roles ar ON ar.id = a.role_id
 		LEFT JOIN departments d ON d.id = k.department_id
@@ -1121,7 +1365,7 @@ func (r *kpiLogRepository) GetStaffLeaderboard(filter domain.KPIQueryFilter) ([]
 		GROUP BY k.target_user_id, a.name, a.last_name, ar.type, a.position
 		ORDER BY total_resolved DESC, avg_mttr_hours ASC
 		LIMIT 50
-	`, resSeconds, whereSQL)
+	`, complaintKPIEventsCTE(filter.ModuleKey), resSeconds, whereSQL)
 
 	var items []domain.KPIStaffLeaderboardItem
 	if err := r.db.Raw(sql, args...).Scan(&items).Error; err != nil {
@@ -1206,14 +1450,15 @@ func (r *kpiLogRepository) GetManagerScorecard(filter domain.KPIQueryFilter) ([]
 		whereArgs = append(whereArgs, filter.UserID)
 	}
 	if filter.DepartmentID != "" {
-		whereSQL += " AND (EXISTS (SELECT 1 FROM admin_departments ad_dept WHERE ad_dept.admin_id = a.id AND ad_dept.department_id = ?) OR EXISTS (SELECT 1 FROM kpi_activity_logs k2 WHERE k2.actor_id = a.id AND k2.department_id = ?))"
+		whereSQL += " AND (EXISTS (SELECT 1 FROM admin_departments ad_dept WHERE ad_dept.admin_id = a.id AND ad_dept.department_id = ?) OR EXISTS (SELECT 1 FROM complaint_kpi_events k2 WHERE k2.actor_id = a.id AND k2.department_id = ?))"
 		whereArgs = append(whereArgs, filter.DepartmentID, filter.DepartmentID)
 	} else if len(filter.DepartmentIDs) > 0 {
-		whereSQL += " AND (EXISTS (SELECT 1 FROM admin_departments ad_dept WHERE ad_dept.admin_id = a.id AND ad_dept.department_id IN (?)) OR EXISTS (SELECT 1 FROM kpi_activity_logs k2 WHERE k2.actor_id = a.id AND k2.department_id IN (?)))"
+		whereSQL += " AND (EXISTS (SELECT 1 FROM admin_departments ad_dept WHERE ad_dept.admin_id = a.id AND ad_dept.department_id IN (?)) OR EXISTS (SELECT 1 FROM complaint_kpi_events k2 WHERE k2.actor_id = a.id AND k2.department_id IN (?)))"
 		whereArgs = append(whereArgs, filter.DepartmentIDs, filter.DepartmentIDs)
 	}
 
 	sql := fmt.Sprintf(`
+		%s
 		SELECT 
 			a.id::text as manager_id,
 			COALESCE(a.name, 'หัวหน้างาน') as name,
@@ -1243,12 +1488,12 @@ func (r *kpiLogRepository) GetManagerScorecard(filter domain.KPIQueryFilter) ([]
 			COUNT(CASE WHEN k.event_code = 'COMPLAINT_DEPT_RETURNED' THEN 1 END) as rejected_return_count
 		FROM admin_users a
 		LEFT JOIN admin_roles ar ON ar.id = a.role_id
-		LEFT JOIN kpi_activity_logs k ON k.actor_id = a.id %s
+		LEFT JOIN complaint_kpi_events k ON k.actor_id = a.id %s
 		%s
 		GROUP BY a.id, a.name, a.last_name, ar.type, a.position
 		ORDER BY total_dispatched DESC, total_resolved_from_dispatched DESC
 		LIMIT 50
-	`, kpiJoinConditions, whereSQL)
+	`, complaintKPIEventsCTE(filter.ModuleKey), kpiJoinConditions, whereSQL)
 
 	allArgs := append(kpiArgs, whereArgs...)
 
@@ -1761,8 +2006,9 @@ func (r *kpiLogRepository) GetStaffDetail(userID string, filter domain.KPIQueryF
 	}
 	var metrics personalMetrics
 	metricsSQL := fmt.Sprintf(`
+		%s
 		SELECT 
-			COUNT(DISTINCT CASE WHEN k.event_code IN ('COMPLAINT_MANAGER_ASSIGNED', 'COMPLAINT_STAFF_ACCEPTED', 'COMPLAINT_STAFF_RESOLVED') THEN k.entity_id END) as total_assigned,
+			COUNT(DISTINCT CASE WHEN k.event_code IN ('COMPLAINT_MANAGER_ASSIGNED', 'COMPLAINT_STAFF_ACCEPTED', 'COMPLAINT_STAFF_ACKNOWLEDGED', 'COMPLAINT_STAFF_RESOLVED') THEN k.entity_id END) as total_assigned,
 			COUNT(DISTINCT CASE WHEN k.event_code = 'COMPLAINT_STAFF_RESOLVED' THEN k.entity_id END) as total_resolved,
 			COALESCE(ROUND((AVG(CASE WHEN k.event_code = 'COMPLAINT_STAFF_RESOLVED' AND k.step_duration_seconds > 0 THEN k.step_duration_seconds END) / 3600.0)::numeric, 1), 0) as avg_mttr_hours,
 			CASE 
@@ -1773,9 +2019,9 @@ func (r *kpiLogRepository) GetStaffDetail(userID string, filter domain.KPIQueryF
 			COUNT(CASE WHEN k.event_code = 'COMPLAINT_STAFF_RESOLVED' AND (k.is_sla_breached = true OR (k.step_duration_seconds > %d AND k.step_duration_seconds > 0)) THEN 1 END) as total_sla_breached,
 			COALESCE(ROUND(AVG(CASE WHEN k.event_code = 'COMPLAINT_CITIZEN_RATED' AND (k.metadata->>'rating') ~ '^[0-9]+$' THEN (k.metadata->>'rating')::numeric END), 2), 0) as avg_rating,
 			COUNT(CASE WHEN k.event_code = 'COMPLAINT_CITIZEN_DISPUTED' THEN 1 END) as dispute_count
-		FROM kpi_activity_logs k
+		FROM complaint_kpi_events k
 		%s
-	`, resolutionCutoff, resolutionCutoff, whereSQL)
+	`, complaintKPIEventsCTE(filter.ModuleKey), resolutionCutoff, resolutionCutoff, whereSQL)
 	_ = r.db.Raw(metricsSQL, args...).Scan(&metrics).Error
 
 	// Synchronize rating and dispute count from module_complaint_rating_histories
@@ -1820,6 +2066,7 @@ func (r *kpiLogRepository) GetStaffDetail(userID string, filter domain.KPIQueryF
 	var rawCases []caseRaw
 	staffCasesWhereSQL := whereSQL + " AND k.event_code IN ('COMPLAINT_STAFF_RESOLVED', 'COMPLAINT_STAFF_ACCEPTED', 'COMPLAINT_STAFF_ACKNOWLEDGED', 'COMPLAINT_STAFF_ACTION', 'COMPLAINT_STAFF_PROGRESS', 'COMPLAINT_STAFF_REJECTED')"
 	casesSQL := fmt.Sprintf(`
+		%s
 		SELECT 
 			COALESCE(k.entity_id::text, '') as entity_id,
 			COALESCE(k.document_number, '-') as document_number,
@@ -1843,11 +2090,11 @@ func (r *kpiLogRepository) GetStaffDetail(userID string, filter domain.KPIQueryF
 			END as breach_duration_seconds,
 			k.created_date,
 			COALESCE(k.metadata::text, '{}') as metadata
-		FROM kpi_activity_logs k
+		FROM complaint_kpi_events k
 		%s
 		ORDER BY k.created_date DESC
 		LIMIT 20
-	`, resolutionCutoff, resolutionCutoff, resolutionCutoff, resolutionCutoff, staffCasesWhereSQL)
+	`, complaintKPIEventsCTE(filter.ModuleKey), resolutionCutoff, resolutionCutoff, resolutionCutoff, resolutionCutoff, staffCasesWhereSQL)
 	_ = r.db.Raw(casesSQL, args...).Scan(&rawCases).Error
 
 	recentCases := make([]domain.KPIPersonalCaseItem, len(rawCases))
@@ -1945,6 +2192,7 @@ func (r *kpiLogRepository) GetManagerDetail(userID string, filter domain.KPIQuer
 	}
 	var metrics managerMetrics
 	metricsSQL := fmt.Sprintf(`
+		%s
 		SELECT 
 			COUNT(DISTINCT CASE WHEN k.event_code IN ('COMPLAINT_CENTER_FORWARDED', 'COMPLAINT_MANAGER_ASSIGNED') THEN k.entity_id END) as total_dispatched,
 			COUNT(DISTINCT CASE WHEN k.event_code IN ('COMPLAINT_CENTER_FORWARDED', 'COMPLAINT_MANAGER_ASSIGNED') AND EXISTS (
@@ -1965,9 +2213,9 @@ func (r *kpiLogRepository) GetManagerDetail(userID string, filter domain.KPIQuer
 			END as sla_compliance_rate,
 			COUNT(CASE WHEN k.event_code IN ('COMPLAINT_CENTER_FORWARDED', 'COMPLAINT_MANAGER_ASSIGNED') AND (k.is_sla_breached = true OR (k.step_duration_seconds > %d AND k.step_duration_seconds > 0)) THEN 1 END) as total_sla_breached,
 			COUNT(CASE WHEN k.event_code = 'COMPLAINT_DEPT_RETURNED' THEN 1 END) as rejected_return_count
-		FROM kpi_activity_logs k
+		FROM complaint_kpi_events k
 		%s
-	`, dispatchCutoff, dispatchCutoff, whereSQL)
+	`, complaintKPIEventsCTE(filter.ModuleKey), dispatchCutoff, dispatchCutoff, whereSQL)
 	_ = r.db.Raw(metricsSQL, args...).Scan(&metrics).Error
 
 	type dispatchCaseRaw struct {
@@ -1987,6 +2235,7 @@ func (r *kpiLogRepository) GetManagerDetail(userID string, filter domain.KPIQuer
 	}
 	var rawCases []dispatchCaseRaw
 	casesSQL := fmt.Sprintf(`
+		%s
 		SELECT 
 			COALESCE(k.entity_id::text, '') as entity_id,
 			COALESCE(k.document_number, '-') as document_number,
@@ -2004,7 +2253,7 @@ func (r *kpiLogRepository) GetManagerDetail(userID string, filter domain.KPIQuer
 			END as breach_duration_seconds,
 			k.created_date,
 			COALESCE(k.metadata->>'reason', '') as reason
-		FROM kpi_activity_logs k
+		FROM complaint_kpi_events k
 		LEFT JOIN module_complaints c ON c.id = k.entity_id
 		LEFT JOIN module_types mt ON mt.id = c.module_type_id
 		LEFT JOIN admin_users target_admin ON target_admin.id = k.target_user_id
@@ -2012,7 +2261,7 @@ func (r *kpiLogRepository) GetManagerDetail(userID string, filter domain.KPIQuer
 		%s
 		ORDER BY k.created_date DESC
 		LIMIT 30
-	`, dispatchCutoff, dispatchCutoff, dispatchCutoff, dispatchCutoff, whereSQL)
+	`, complaintKPIEventsCTE(filter.ModuleKey), dispatchCutoff, dispatchCutoff, dispatchCutoff, dispatchCutoff, whereSQL)
 	_ = r.db.Raw(casesSQL, args...).Scan(&rawCases).Error
 
 	recentCases := make([]domain.KPIManagerDispatchCaseItem, len(rawCases))
@@ -2246,6 +2495,7 @@ func (r *kpiLogRepository) GetBreachedCases(filter domain.KPIQueryFilter) ([]dom
 	}
 
 	logSQL := fmt.Sprintf(`
+		%s
 		SELECT 
 			c.id::text as id,
 			COALESCE(c.document_id, '-') as document_number,
@@ -2265,7 +2515,7 @@ func (r *kpiLogRepository) GetBreachedCases(filter domain.KPIQueryFilter) ([]dom
 				ELSE k.breach_duration_seconds
 			END as overdue_seconds,
 			false as is_active
-		FROM kpi_activity_logs k
+		FROM complaint_kpi_events k
 		JOIN module_complaints c ON c.id = k.entity_id
 		LEFT JOIN module_types mt ON mt.id = c.module_type_id
 		LEFT JOIN departments d ON d.id = COALESCE(k.department_id, c.department_id)
@@ -2274,7 +2524,7 @@ func (r *kpiLogRepository) GetBreachedCases(filter domain.KPIQueryFilter) ([]dom
 		%s
 		ORDER BY k.created_date DESC
 		LIMIT 100
-	`, resSeconds, resSeconds, resSeconds, logWhere)
+	`, complaintKPIEventsCTE(filter.ModuleKey), resSeconds, resSeconds, resSeconds, logWhere)
 
 	var resolvedCases []domain.KPIBreachedCaseItem
 	if err := r.db.Raw(logSQL, logArgs...).Scan(&resolvedCases).Error; err == nil {

@@ -4,6 +4,7 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/joho/godotenv"
 )
@@ -40,6 +41,12 @@ type Config struct {
 	// PDPA Citizen ID / PII Security (AES-256-GCM + Blind Index HMAC)
 	PIDEncryptionKey string
 	PIDHmacSecret    string
+
+	// CCTV Health & Probe Integration
+	CCTVHealthCheckEnabled bool
+	CCTVSnapshotEnabled    bool
+	CCTVCheckerURL         string
+	CCTVCheckerSecret      string
 }
 
 type RedisConfig struct {
@@ -201,8 +208,12 @@ func LoadConfig() *Config {
 		FahfonWeatherMapURL:  fahfonWeatherMapURL,
 		FahfonServiceKey:     fahfonServiceKey,
 		M2MSecretKey:         m2mSecretKey,
-		PIDEncryptionKey:     os.Getenv("PID_ENCRYPTION_KEY"),
-		PIDHmacSecret:        os.Getenv("PID_HMAC_SECRET"),
+		PIDEncryptionKey:       os.Getenv("PID_ENCRYPTION_KEY"),
+		PIDHmacSecret:          os.Getenv("PID_HMAC_SECRET"),
+		CCTVHealthCheckEnabled: getEnvBool("CCTV_HEALTHCHECK_ENABLED", false),
+		CCTVSnapshotEnabled:    getEnvBool("CCTV_SNAPSHOT_ENABLED", false),
+		CCTVCheckerURL:         strings.TrimRight(strings.TrimSpace(os.Getenv("CCTV_CHECKER_URL")), "/"),
+		CCTVCheckerSecret:      strings.TrimSpace(os.Getenv("CCTV_CHECKER_SECRET")),
 		MinIO: MinIOConfig{
 			Endpoint:        minioEndpoint,
 			AccessKey:       minioAccessKey,

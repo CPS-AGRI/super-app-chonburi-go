@@ -1,7 +1,17 @@
 package usecase
 
 import (
+	"bytes"
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"io"
+	"log"
+	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -11,12 +21,29 @@ import (
 )
 
 type cctvUseCase struct {
-	repo domain.AdminCCTVRepository
+	repo          domain.AdminCCTVRepository
+	checkerURL    string
+	checkerSecret string
+	httpClient    *http.Client
 }
 
 // NewCCTVUseCase creates a new AdminCCTVUseCase.
 func NewCCTVUseCase(repo domain.AdminCCTVRepository) domain.AdminCCTVUseCase {
-	return &cctvUseCase{repo: repo}
+	return &cctvUseCase{
+		repo:       repo,
+		httpClient: &http.Client{Timeout: 8 * time.Second},
+	}
+}
+
+// NewCCTVUseCaseWithChecker creates an AdminCCTVUseCase that offloads stream health checks
+// to the dedicated chon-cctv-checker microservice over WireGuard when configured.
+func NewCCTVUseCaseWithChecker(repo domain.AdminCCTVRepository, checkerURL, checkerSecret string) domain.AdminCCTVUseCase {
+	return &cctvUseCase{
+		repo:          repo,
+		checkerURL:    strings.TrimRight(strings.TrimSpace(checkerURL), "/"),
+		checkerSecret: strings.TrimSpace(checkerSecret),
+		httpClient:    &http.Client{Timeout: 8 * time.Second},
+	}
 }
 
 func (u *cctvUseCase) CreateCCTV(cctv *domain.CCTV) error {
@@ -29,10 +56,24 @@ func (u *cctvUseCase) CreateCCTV(cctv *domain.CCTV) error {
 	if cctv.ID == uuid.Nil {
 		cctv.ID = uuid.New()
 	}
-	cctv.Status = CheckCameraStatus(cctv.StreamURL)
+	if cctv.Status == "" {
+		cctv.Status = "ONLINE"
+	}
 	cctv.CreatedAt = time.Now()
 	cctv.UpdatedAt = time.Now()
-	return u.repo.Create(cctv)
+	if err := u.repo.Create(cctv); err != nil {
+		return err
+	}
+
+	// Verify stream health asynchronously
+	if cctv.StreamURL != "" {
+		go func(camID uuid.UUID, stream string) {
+			actualStatus := u.probeStreamStatus(stream)
+			_ = u.repo.Update(camID, map[string]interface{}{"status": actualStatus})
+		}(cctv.ID, cctv.StreamURL)
+	}
+
+	return nil
 }
 
 func (u *cctvUseCase) GetCCTVs(query domain.CCTVQuery) (*domain.PaginatedCCTVResponse, error) {
@@ -51,7 +92,8 @@ func (u *cctvUseCase) GetCCTVByID(id uuid.UUID) (*domain.CCTV, error) {
 
 func (u *cctvUseCase) UpdateCCTV(id uuid.UUID, updates map[string]interface{}) (*domain.CCTV, error) {
 	if streamURL, ok := updates["stream_url"].(string); ok && streamURL != "" {
-		updates["status"] = CheckCameraStatus(streamURL)
+		// When stream URL is modified, re-verify its health
+		updates["status"] = u.probeStreamStatus(streamURL)
 	}
 	if err := u.repo.Update(id, updates); err != nil {
 		return nil, err
@@ -76,16 +118,11 @@ func (u *cctvUseCase) RecordViewLog(input domain.CreateCCTVLogInput, userID uuid
 		cctvUUID, err = uuid.Parse(input.CCTVID)
 	}
 
-	// Fallback lookup if not a direct UUID
+	// Fallback lookup by Name if not a direct UUID
 	if err != nil || cctvUUID == uuid.Nil {
 		cctvs, _ := u.repo.GetPaginated(domain.CCTVQuery{PageNumber: 1, PageSize: 1, Name: input.CCTVID})
 		if cctvs != nil && len(cctvs.Items) > 0 {
 			cctvUUID = cctvs.Items[0].ID
-		} else {
-			allCCTVs, _ := u.repo.GetPaginated(domain.CCTVQuery{PageNumber: 1, PageSize: 1})
-			if allCCTVs != nil && len(allCCTVs.Items) > 0 {
-				cctvUUID = allCCTVs.Items[0].ID
-			}
 		}
 	}
 
@@ -164,11 +201,94 @@ func (u *cctvUseCase) CheckCameraHealth(id uuid.UUID) (string, error) {
 	if err != nil {
 		return "OFFLINE", err
 	}
-	status := CheckCameraStatus(cam.StreamURL)
+	status := u.probeStreamStatus(cam.StreamURL)
 	if strings.ToUpper(cam.Status) != status {
 		_ = u.repo.Update(id, map[string]interface{}{"status": status})
 	}
 	return status, nil
+}
+
+func (u *cctvUseCase) GetHealthTargets() ([]domain.CCTVHealthTarget, error) {
+	return u.repo.GetHealthTargets()
+}
+
+func (u *cctvUseCase) SyncCameraHealthStatuses(updates []domain.CCTVHealthUpdate) (int64, error) {
+	return u.repo.BatchUpdateStatus(updates)
+}
+
+func (u *cctvUseCase) probeStreamStatus(streamURL string) string {
+	if u.checkerURL != "" && len(u.checkerSecret) >= 32 {
+		if status, ok := u.probeViaRemoteChecker(streamURL); ok {
+			return status
+		}
+	}
+	return CheckCameraStatus(streamURL)
+}
+
+func (u *cctvUseCase) probeViaRemoteChecker(streamURL string) (string, bool) {
+	const probePath = "/api/v1/cctv/probe"
+	payload, err := json.Marshal(map[string]string{"stream_url": strings.TrimSpace(streamURL)})
+	if err != nil {
+		return "OFFLINE", false
+	}
+
+	nonceBytes := make([]byte, 16)
+	if _, err := rand.Read(nonceBytes); err != nil {
+		return "OFFLINE", false
+	}
+	nonce := hex.EncodeToString(nonceBytes)
+	ts := strconv.FormatInt(time.Now().Unix(), 10)
+
+	bodySum := sha256.Sum256(payload)
+	canonical := strings.Join([]string{
+		http.MethodPost,
+		probePath,
+		ts,
+		nonce,
+		hex.EncodeToString(bodySum[:]),
+	}, "\n")
+	mac := hmac.New(sha256.New, []byte(u.checkerSecret))
+	mac.Write([]byte(canonical))
+	sig := hex.EncodeToString(mac.Sum(nil))
+
+	req, err := http.NewRequest(http.MethodPost, u.checkerURL+probePath, bytes.NewReader(payload))
+	if err != nil {
+		return "OFFLINE", false
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Timestamp", ts)
+	req.Header.Set("X-Nonce", nonce)
+	req.Header.Set("X-Signature", sig)
+
+	client := u.httpClient
+	if client == nil {
+		client = &http.Client{Timeout: 8 * time.Second}
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("⚠️ [CCTV Probe] Remote checker unreachable: %v", err)
+		return "OFFLINE", false
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		log.Printf("⚠️ [CCTV Probe] Remote checker returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(bodyBytes)))
+		return "OFFLINE", false
+	}
+
+	var parsed struct {
+		Success bool   `json:"success"`
+		Status  string `json:"status"`
+	}
+	if err := json.Unmarshal(bodyBytes, &parsed); err != nil || !parsed.Success {
+		return "OFFLINE", false
+	}
+	normalized := strings.ToUpper(strings.TrimSpace(parsed.Status))
+	if normalized != "ONLINE" && normalized != "OFFLINE" {
+		return "OFFLINE", false
+	}
+	return normalized, true
 }
 
 

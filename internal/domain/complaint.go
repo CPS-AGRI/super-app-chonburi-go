@@ -139,6 +139,7 @@ type ComplaintQuery struct {
 	StartDate      *string `query:"start_date"`
 	EndDate        *string `query:"end_date"`
 	DepartmentID   *string `query:"department_id"`
+	Scope          string  `query:"scope"`
 
 	AllowedModuleTypeIDs []string
 	IsSuperAdmin         bool
@@ -170,6 +171,7 @@ type ComplaintRepository interface {
 	GetOverviewStats() (*ComplaintOverviewStats, error)
 	CreateRatingHistory(history *ComplaintRatingHistory) error
 	GetCompleterInfo(complaintID string) (*string, *string, error)
+	GetUnmaskedCitizenID(complaintID string) (string, error)
 }
 
 type ComplaintOverviewStats struct {
@@ -184,6 +186,7 @@ type ComplaintOverviewStats struct {
 type ComplaintUseCase interface {
 	GetComplaints(query ComplaintQuery, adminID string) (*PaginatedComplaintResponse, error)
 	GetComplaintByID(id string, adminID string) (*Complaint, error)
+	UnmaskComplaintCitizenID(id string, adminID string, role string, ip string, userAgent string, traceID string) (string, error)
 	CreateComplaint(complaint *Complaint) error
 	UpdateComplaintStatus(id string, status string, description string, adminID string, images []string) error
 	ForwardComplaint(id string, departmentID string, description string, adminID string) error

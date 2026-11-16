@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"super-app-chonburi-go/internal/domain"
@@ -15,6 +16,7 @@ type complaintUseCase struct {
 	adminRepo     domain.AdminRepository
 	muniRepo      domain.MunicipalityRepository
 	kpiLogger     domain.KPILogger
+	auditRepo     domain.AuditLogRepository
 }
 
 func NewComplaintUseCase(complaintRepo domain.ComplaintRepository, adminRepo domain.AdminRepository, muniRepo domain.MunicipalityRepository, kpiLogger domain.KPILogger) domain.ComplaintUseCase {
@@ -23,6 +25,16 @@ func NewComplaintUseCase(complaintRepo domain.ComplaintRepository, adminRepo dom
 		adminRepo:     adminRepo,
 		muniRepo:      muniRepo,
 		kpiLogger:     kpiLogger,
+	}
+}
+
+func NewComplaintUseCaseWithAudit(complaintRepo domain.ComplaintRepository, adminRepo domain.AdminRepository, muniRepo domain.MunicipalityRepository, kpiLogger domain.KPILogger, auditRepo domain.AuditLogRepository) domain.ComplaintUseCase {
+	return &complaintUseCase{
+		complaintRepo: complaintRepo,
+		adminRepo:     adminRepo,
+		muniRepo:      muniRepo,
+		kpiLogger:     kpiLogger,
+		auditRepo:     auditRepo,
 	}
 }
 
@@ -87,6 +99,38 @@ func (u *complaintUseCase) GetComplaintByID(id string, adminID string) (*domain.
 	}
 
 	return u.complaintRepo.GetByID(id, nil, admin.Role != nil && admin.Role.Type == "super_admin")
+}
+
+func (u *complaintUseCase) UnmaskComplaintCitizenID(id string, adminID string, role string, ip string, userAgent string, traceID string) (string, error) {
+	if !IsCitizenIDUnmaskAllowed(role) {
+		return "", errors.New("FORBIDDEN: เฉพาะ SuperAdmin และระดับหัวหน้างาน (Managers) เท่านั้นที่สามารถดูเลขบัตรประชาชนฉบับเต็มได้")
+	}
+
+	fullID, err := u.complaintRepo.GetUnmaskedCitizenID(id)
+	if err != nil {
+		return "", err
+	}
+
+	if u.auditRepo != nil {
+		if traceID == "" {
+			traceID = uuid.New().String()
+		}
+		_ = u.auditRepo.Create(&domain.AuditLog{
+			ID:                 uuid.New().String(),
+			TraceId:            traceID,
+			UserId:             adminID,
+			RoleId:             role,
+			Method:             "POST",
+			Path:               fmt.Sprintf("/api/v1/complaints/%s/unmask-id", id),
+			ResponseStatusCode: 200,
+			IPAddress:          ip,
+			UserAgent:          userAgent,
+			RequestTime:        time.Now(),
+			ResponseTime:       time.Now(),
+		})
+	}
+
+	return fullID, nil
 }
 
 func getThaiComplaintStatus(status string) string {
@@ -417,6 +461,7 @@ func (u *complaintUseCase) AssignComplaint(id string, assigneeID string, descrip
 		breachDuration = int64(dispatchDuration) - slaTarget
 	}
 
+	complaint.AssignerId = &adminID
 	complaint.AssigneeId = &assigneeID
 	complaint.Status = domain.ComplaintStatusInProgress
 	complaint.UpdatedDate = time.Now()

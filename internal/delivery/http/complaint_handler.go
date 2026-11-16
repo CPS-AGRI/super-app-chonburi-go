@@ -26,6 +26,7 @@ func (h *ComplaintHandler) RegisterRoutes(router fiber.Router) {
 	group.Get("/overview-stats", h.GetOverviewStats)
 	group.Get("/rating-summaries", h.GetRatingSummaries)
 	group.Get("/:id", h.GetComplaintByID)
+	group.Post("/:id/unmask-id", h.UnmaskCitizenID)
 	group.Post("", h.Create)
 	group.Put("/:id/status", h.UpdateStatus)
 	group.Post("/:id/forward", h.Forward)
@@ -72,6 +73,31 @@ func (h *ComplaintHandler) GetComplaintByID(c fiber.Ctx) error {
 	}
 
 	return c.JSON(fiber.Map{"data": result})
+}
+
+func (h *ComplaintHandler) UnmaskCitizenID(c fiber.Ctx) error {
+	userClaims, ok := c.Locals("user").(*jwtutil.CustomClaims)
+	if !ok || userClaims == nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
+	}
+
+	id := c.Params("id")
+	if _, err := uuid.Parse(id); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid complaint id format"})
+	}
+
+	fullID, err := h.uc.UnmaskComplaintCitizenID(id, userClaims.ID, userClaims.Role, c.IP(), c.Get("User-Agent"), c.Get("X-Request-ID"))
+	if err != nil {
+		if strings.Contains(err.Error(), "FORBIDDEN") {
+			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": err.Error()})
+		}
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "citizen id not found"})
+	}
+
+	return c.JSON(fiber.Map{
+		"complaint_id":    id,
+		"identity_number": fullID,
+	})
 }
 
 func (h *ComplaintHandler) Create(c fiber.Ctx) error {

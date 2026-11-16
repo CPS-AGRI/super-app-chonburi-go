@@ -115,7 +115,7 @@ func main() {
 	adminUC := usecase.NewAdminUseCase(adminRepo, emailSender, cfg.FrontendURL)
 	adminRoleUC := usecase.NewAdminRoleUseCase(adminRoleRepo)
 	deptUC := usecase.NewDepartmentUseCase(deptRepo)
-	complaintUC := usecase.NewComplaintUseCase(complaintRepo, adminRepo, muniRepo, kpiLogger)
+	complaintUC := usecase.NewComplaintUseCaseWithAudit(complaintRepo, adminRepo, muniRepo, kpiLogger, auditRepo)
 	kpiUC := usecase.NewKPIUseCase(kpiRepo)
 	moduleUC := usecase.NewModuleUseCase(moduleRepo, adminRepo)
 	moduleTypeUC := usecase.NewModuleTypeUseCase(moduleTypeRepo)
@@ -126,13 +126,18 @@ func main() {
 	taxNewUC := usecase.NewTaxNewUseCase(taxNewRepo, emailSender, "")
 	publicRelationUC := usecase.NewPublicRelationUseCase(publicRelationRepo, adminRepo, storageProvider, database.DB, kpiLogger)
 	verificationUC := usecase.NewVerificationUseCase(verificationRepo, auditRepo)
-	cctvUC := usecase.NewCCTVUseCase(cctvRepo)
+	cctvUC := usecase.NewCCTVUseCaseWithChecker(cctvRepo, cfg.CCTVCheckerURL, cfg.CCTVCheckerSecret)
 	weatherAccountRepo := repository.NewWeatherAccountRepository(database.DB)
 	weatherAccountUC := usecase.NewWeatherAccountUseCase(weatherAccountRepo)
 
-	// Start CCTV Snapshot & Healthcheck Background Workers
-	usecase.StartSnapshotWorker(database.DB, storageProvider)
-	usecase.StartCCTVHealthCheckWorker(database.DB)
+	// Start CCTV Snapshot & Healthcheck Workers only when explicitly enabled
+	// (In Production, dedicated cctv-checker service handles CCTV health probing)
+	if cfg.CCTVSnapshotEnabled {
+		usecase.StartSnapshotWorker(database.DB, storageProvider)
+	}
+	if cfg.CCTVHealthCheckEnabled {
+		usecase.StartCCTVHealthCheckWorker(database.DB)
+	}
 
 	authHandler := delivery.NewAuthHandler(authUC)
 	uploadHandler := delivery.NewUploadHandler(minioClient, cfg.MinIO)
@@ -191,10 +196,11 @@ func main() {
 	notificationHandler.RegisterRoutes(api)
 	weatherAccountHandler.RegisterRoutes(api)
 
-	// Register Weather & Water Level Telemetry endpoints protected by M2M HMAC-SHA256 & JWT Bearer
+	// Register Weather, Water Level, and Internal CCTV sync endpoints protected by M2M HMAC-SHA256 & JWT Bearer
 	protected := api.Group("", middleware.M2MOrJWT(cfg))
 	weatherHandler.RegisterRoutes(protected)
 	waterLevelHandler.RegisterRoutes(protected)
+	cctvHandler.RegisterInternalRoutes(protected)
 
 	port := ":" + cfg.AppPort
 	log.Printf("🚀 Server is starting on http://localhost%s", port)
