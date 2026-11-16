@@ -76,6 +76,53 @@ func (r *cctvRepository) Delete(id uuid.UUID, adminID string) error {
 	return r.db.Where("id = ?", id).Delete(&domain.CCTV{}).Error
 }
 
+func (r *cctvRepository) GetHealthTargets() ([]domain.CCTVHealthTarget, error) {
+	var targets []domain.CCTVHealthTarget
+	err := r.db.Model(&domain.CCTV{}).
+		Select("id, stream_url, status").
+		Order("name ASC").
+		Find(&targets).Error
+	if err != nil {
+		return nil, err
+	}
+	return targets, nil
+}
+
+func (r *cctvRepository) BatchUpdateStatus(updates []domain.CCTVHealthUpdate) (int64, error) {
+	if len(updates) == 0 {
+		return 0, nil
+	}
+
+	var totalUpdated int64
+	now := time.Now()
+	err := r.db.Transaction(func(tx *gorm.DB) error {
+		for _, item := range updates {
+			if item.ID == uuid.Nil {
+				continue
+			}
+			normalized := strings.ToUpper(strings.TrimSpace(item.Status))
+			if normalized != "ONLINE" && normalized != "OFFLINE" {
+				continue
+			}
+			res := tx.Model(&domain.CCTV{}).
+				Where("id = ? AND status <> ?", item.ID, normalized).
+				Updates(map[string]interface{}{
+					"status":     normalized,
+					"updated_at": now,
+				})
+			if res.Error != nil {
+				return res.Error
+			}
+			totalUpdated += res.RowsAffected
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	return totalUpdated, nil
+}
+
 func (r *cctvRepository) CreateViewLog(logItem *domain.CCTVViewLog) error {
 	err := r.db.Omit("CCTV", "Admin", "User").Create(logItem).Error
 	if err != nil {

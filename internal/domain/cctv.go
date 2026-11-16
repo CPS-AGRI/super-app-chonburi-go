@@ -139,6 +139,19 @@ type PaginatedCCTVUserSummaryResponse struct {
 	TotalPages int                   `json:"total_pages"`
 }
 
+// CCTVHealthTarget is a lightweight projection synced to the dedicated chon-cctv-checker service.
+type CCTVHealthTarget struct {
+	ID        uuid.UUID `gorm:"column:id" json:"id"`
+	StreamURL string    `gorm:"column:stream_url" json:"stream_url"`
+	Status    string    `gorm:"column:status" json:"status"`
+}
+
+// CCTVHealthUpdate represents a delta status change reported by chon-cctv-checker.
+type CCTVHealthUpdate struct {
+	ID     uuid.UUID `json:"id"`
+	Status string    `json:"status"`
+}
+
 // AdminCCTVRepository defines the data layer interface for Admin CCTV API.
 type AdminCCTVRepository interface {
 	Create(cctv *CCTV) error
@@ -146,6 +159,8 @@ type AdminCCTVRepository interface {
 	FindByID(id uuid.UUID) (*CCTV, error)
 	Update(id uuid.UUID, updates map[string]interface{}) error
 	Delete(id uuid.UUID, adminID string) error
+	GetHealthTargets() ([]CCTVHealthTarget, error)
+	BatchUpdateStatus(updates []CCTVHealthUpdate) (int64, error)
 
 	// CCTV View Logs
 	CreateViewLog(log *CCTVViewLog) error
@@ -168,5 +183,7 @@ type AdminCCTVUseCase interface {
 
 	// Healthcheck
 	CheckCameraHealth(id uuid.UUID) (string, error)
+	GetHealthTargets() ([]CCTVHealthTarget, error)
+	SyncCameraHealthStatuses(updates []CCTVHealthUpdate) (int64, error)
 }
 

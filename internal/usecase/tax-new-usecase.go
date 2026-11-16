@@ -152,7 +152,8 @@ func (u *taxNewUseCase) DeclareTax(req domain.DeclareTaxRequest) (*domain.Declar
 		return nil, err
 	}
 
-	SendNotificationToDepartment(
+	SendNotificationToDepartmentWithModule(
+		"tax",
 		"",
 		"Employees",
 		"มีรายการยื่นแบบภาษีใหม่",

@@ -47,19 +47,33 @@ func NewVerificationRepository(db *gorm.DB) domain.AdminVerificationRepository {
 	return &verificationRepository{db: db}
 }
 
+// applyActiveUserVerificationScope filters out soft-deleted citizen accounts using the schema's
+// actual lifecycle columns (users has no deleted_at column) and ensures a phone number exists.
+func applyActiveUserVerificationScope(db *gorm.DB) *gorm.DB {
+	return db.
+		Joins("INNER JOIN users u ON u.id = user_informations.user_id").
+		Where("COALESCE(u.phone_number, '') NOT LIKE ?", "DELETED_%").
+		Where("LOWER(COALESCE(user_informations.status, 'active')) NOT IN ?", []string{"inactive", "deleted"}).
+		Where("COALESCE(user_informations.phone, '') NOT LIKE ?", "DELETED_%").
+		Where("COALESCE(NULLIF(TRIM(user_informations.phone), ''), NULLIF(TRIM(u.phone_number), '')) IS NOT NULL")
+}
+
 func (r *verificationRepository) GetPaginated(query domain.VerificationQuery) (*domain.PaginatedVerificationResponse, error) {
 	var infos []domain.UserInformation
 	var total int64
 
-	db := r.db.Model(&domain.UserInformation{})
+	db := applyActiveUserVerificationScope(r.db.Model(&domain.UserInformation{}))
 
 	if query.VerificationStatus != "" {
-		db = db.Where("verification_status = ?", query.VerificationStatus)
+		db = db.Where("user_informations.verification_status = ?", query.VerificationStatus)
 	}
 
 	if query.Search != "" {
 		searchPattern := "%" + query.Search + "%"
-		db = db.Where("name ILIKE ? OR last_name ILIKE ? OR phone ILIKE ?", searchPattern, searchPattern, searchPattern)
+		db = db.Where(
+			"(user_informations.name ILIKE ? OR user_informations.last_name ILIKE ? OR user_informations.phone ILIKE ?)",
+			searchPattern, searchPattern, searchPattern,
+		)
 	}
 
 	if err := db.Count(&total).Error; err != nil {
@@ -67,7 +81,7 @@ func (r *verificationRepository) GetPaginated(query domain.VerificationQuery) (*
 	}
 
 	offset := (query.PageNumber - 1) * query.PageSize
-	err := db.Order("created_date DESC").
+	err := db.Order("user_informations.created_date DESC").
 		Offset(offset).Limit(query.PageSize).
 		Find(&infos).Error
 	if err != nil {

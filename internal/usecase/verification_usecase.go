@@ -37,16 +37,28 @@ func (u *verificationUseCase) GetVerificationByID(userID uuid.UUID) (*domain.Use
 	return u.repo.GetByID(userID)
 }
 
-func (u *verificationUseCase) UnmaskCitizenID(userID uuid.UUID, adminID string, role string, ip string, userAgent string, traceID string) (string, error) {
-	rLower := strings.ToLower(role)
-	isSupervisor := strings.Contains(rLower, "super") ||
-		strings.Contains(rLower, "manager") ||
+// IsCitizenIDUnmaskAllowed grants unmasked Citizen ID visibility strictly to SuperAdmin and Managers.
+func IsCitizenIDUnmaskAllowed(role string) bool {
+	rLower := strings.ToLower(strings.TrimSpace(role))
+	if rLower == "" {
+		return false
+	}
+	if strings.Contains(rLower, "employee") ||
+		strings.Contains(rLower, "staff") ||
 		strings.Contains(rLower, "executive") ||
-		strings.Contains(rLower, "หัวหน้า") ||
-		strings.Contains(rLower, "ผู้บริหาร")
+		strings.Contains(rLower, "พนักงาน") ||
+		strings.Contains(rLower, "ผู้บริหาร") {
+		return false
+	}
+	return strings.Contains(rLower, "super") ||
+		strings.Contains(rLower, "manager") ||
+		strings.Contains(rLower, "supervisor") ||
+		strings.Contains(rLower, "หัวหน้า")
+}
 
-	if !isSupervisor {
-		return "", errors.New("FORBIDDEN: เฉพาะระดับหัวหน้างานขึ้นไปเท่านั้นที่สามารถดูเลขบัตรประชาชนฉบับเต็มได้")
+func (u *verificationUseCase) UnmaskCitizenID(userID uuid.UUID, adminID string, role string, ip string, userAgent string, traceID string) (string, error) {
+	if !IsCitizenIDUnmaskAllowed(role) {
+		return "", errors.New("FORBIDDEN: เฉพาะ SuperAdmin และระดับหัวหน้างาน (Managers) เท่านั้นที่สามารถดูเลขบัตรประชาชนฉบับเต็มได้")
 	}
 
 	fullID, err := u.repo.GetUnmaskedCitizenID(userID)

@@ -177,7 +177,10 @@ func (r *publicRelationRepository) GetPaginated(moduleId string, query domain.Pu
 	err := db.Preload("Images").
 		Preload("VisitorCount").
 		Preload("AdminUser").
-		Preload("Comments.User.Information").
+		Preload("Comments", func(db *gorm.DB) *gorm.DB {
+			return db.Preload("User.Information").
+				Order("CASE WHEN status = 'reported' THEN 0 ELSE 1 END, created_date DESC")
+		}).
 		Offset(offset).Limit(query.PageSize).
 		Order("created_date DESC").
 		Find(&items).Error
@@ -198,7 +201,8 @@ func (r *publicRelationRepository) GetByID(moduleId string, id string) (*domain.
 	err := r.db.Preload("Images").
 		Preload("VisitorCount").
 		Preload("Comments", func(db *gorm.DB) *gorm.DB {
-			return db.Preload("User.Information").Order("created_date DESC")
+			return db.Preload("User.Information").
+				Order("CASE WHEN status = 'reported' THEN 0 ELSE 1 END, created_date DESC")
 		}).
 		Preload("AdminUser").
 		Where("module_id = ? AND id = ?", moduleId, id).
@@ -280,30 +284,36 @@ func (r *publicRelationRepository) Delete(moduleId string, id string) error {
 	})
 }
 
-func (r *publicRelationRepository) HideComment(moduleId string, prId string, commentId string) error {
-
+func (r *publicRelationRepository) updateCommentStatus(moduleId string, prId string, commentId string, status string) error {
 	var count int64
-	r.db.Model(&domain.PublicRelation{}).Where("module_id = ? AND id = ?", moduleId, prId).Count(&count)
+	if err := r.db.Model(&domain.PublicRelation{}).Where("module_id = ? AND id = ?", moduleId, prId).Count(&count).Error; err != nil {
+		return err
+	}
 	if count == 0 {
 		return errors.New("public relation not found in this module")
 	}
 
-	return r.db.Model(&domain.PublicRelationComment{}).
+	res := r.db.Model(&domain.PublicRelationComment{}).
 		Where("id = ? AND module_public_relation_id = ?", commentId, prId).
-		Update("status", "hidden").Error
+		Updates(map[string]interface{}{
+			"status":       status,
+			"updated_date": time.Now(),
+		})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return domain.ErrPRCommentNotFound
+	}
+	return nil
+}
+
+func (r *publicRelationRepository) HideComment(moduleId string, prId string, commentId string) error {
+	return r.updateCommentStatus(moduleId, prId, commentId, "hidden")
 }
 
 func (r *publicRelationRepository) ShowComment(moduleId string, prId string, commentId string) error {
-
-	var count int64
-	r.db.Model(&domain.PublicRelation{}).Where("module_id = ? AND id = ?", moduleId, prId).Count(&count)
-	if count == 0 {
-		return errors.New("public relation not found in this module")
-	}
-
-	return r.db.Model(&domain.PublicRelationComment{}).
-		Where("id = ? AND module_public_relation_id = ?", commentId, prId).
-		Update("status", "active").Error
+	return r.updateCommentStatus(moduleId, prId, commentId, "active")
 }
 
 func (r *publicRelationRepository) GetPaginatedNotifications(moduleId string, query domain.PublicRelationNotificationQuery, history bool) (*domain.PaginatedNotificationResponse, error) {

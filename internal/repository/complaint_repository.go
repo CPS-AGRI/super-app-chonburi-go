@@ -3,7 +3,6 @@ package repository
 import (
 	"errors"
 	"sort"
-	"strings"
 	"super-app-chonburi-go/internal/domain"
 	"super-app-chonburi-go/pkg/crypto"
 	"time"
@@ -71,14 +70,14 @@ func (r *complaintRepository) GetPaginated(query domain.ComplaintQuery) (*domain
 			}
 		}
 
-		isDashboardView := query.HasBeenAssigned != nil || isRequestingRejected || query.IsComplaintCenter
+		isCenterScope := query.IsComplaintCenter && query.Scope != "department" && (query.Scope == "center" || query.HasBeenAssigned != nil || isRequestingRejected)
 
 		if query.AssigneeId != nil {
 
 			if query.AdminRoleType == "Employees" {
 				db = db.Where("module_complaints.status NOT IN ?", []string{domain.ComplaintStatusPending, domain.ComplaintStatusReceived})
 			}
-		} else if query.IsComplaintCenter && isDashboardView {
+		} else if isCenterScope {
 
 			if isCentralMode {
 
@@ -110,9 +109,17 @@ func (r *complaintRepository) GetPaginated(query domain.ComplaintQuery) (*domain
 					db = db.Where("1 = 0")
 				}
 			} else {
-
-				if len(query.AllowedModuleTypeIDs) > 0 {
-					db = db.Where("module_complaints.module_type_id IN ?", query.AllowedModuleTypeIDs)
+				// Even in direct mode, once a complaint is explicitly forwarded/assigned to a department,
+				// only that target department may manage it.
+				if len(query.AdminDepartmentIDs) > 0 && len(query.AllowedModuleTypeIDs) > 0 {
+					db = db.Where(
+						"(module_complaints.department_id IN ?) OR (module_complaints.department_id IS NULL AND module_complaints.module_type_id IN ?)",
+						query.AdminDepartmentIDs, query.AllowedModuleTypeIDs,
+					)
+				} else if len(query.AdminDepartmentIDs) > 0 {
+					db = db.Where("module_complaints.department_id IN ?", query.AdminDepartmentIDs)
+				} else if len(query.AllowedModuleTypeIDs) > 0 {
+					db = db.Where("module_complaints.department_id IS NULL AND module_complaints.module_type_id IN ?", query.AllowedModuleTypeIDs)
 				} else {
 					db = db.Where("1 = 0")
 				}
@@ -148,10 +155,9 @@ func (r *complaintRepository) GetPaginated(query domain.ComplaintQuery) (*domain
 
 			if complaints[i].User != nil && complaints[i].User.Information != nil {
 				info := *complaints[i].User.Information
-
-				if strings.HasPrefix(info.IdentityNumberEncrypted, "ENC_") {
-					info.IdentityNumberEncrypted = info.IdentityNumberEncrypted[4:]
-				}
+				idNum := crypto.DecryptPID(info.IdentityNumberEncrypted)
+				info.IdentityNumberEncrypted = FormatAndMaskCitizenID(idNum)
+				info.LaserIdEncrypted = ""
 				complaints[i].UserInformation = &info
 			}
 		}
@@ -196,8 +202,9 @@ func (r *complaintRepository) GetByID(id string, allowedModuleTypeIDs []string, 
 
 	if err == nil && complaint.User != nil && complaint.User.Information != nil {
 		info := *complaint.User.Information
-		info.IdentityNumberEncrypted = crypto.DecryptPID(info.IdentityNumberEncrypted)
-		info.LaserIdEncrypted = crypto.DecryptPID(info.LaserIdEncrypted)
+		idNum := crypto.DecryptPID(info.IdentityNumberEncrypted)
+		info.IdentityNumberEncrypted = FormatAndMaskCitizenID(idNum)
+		info.LaserIdEncrypted = ""
 		complaint.UserInformation = &info
 	}
 
@@ -432,4 +439,17 @@ func (r *complaintRepository) GetCompleterInfo(complaintID string) (*string, *st
 	}
 
 	return assigneeIDPtr, deptIDPtr, nil
+}
+
+func (r *complaintRepository) GetUnmaskedCitizenID(complaintID string) (string, error) {
+	var complaint domain.Complaint
+	if err := r.db.Select("user_id").Where("id = ?", complaintID).First(&complaint).Error; err != nil {
+		return "", err
+	}
+	var info domain.UserInformation
+	if err := r.db.Select("identity_number_encrypted").Where("user_id = ?", complaint.UserId).First(&info).Error; err != nil {
+		return "", err
+	}
+	idNum := crypto.DecryptPID(info.IdentityNumberEncrypted)
+	return FormatFullCitizenID(idNum), nil
 }

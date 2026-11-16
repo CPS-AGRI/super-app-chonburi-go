@@ -36,6 +36,14 @@ func (h *CCTVHandler) RegisterRoutes(router fiber.Router) {
 	group.Get("/logs/summary", h.GetUserSummaryLogs)
 }
 
+// RegisterInternalRoutes registers M2M-authenticated internal CCTV sync endpoints
+// consumed by the dedicated chon-cctv-checker service over WireGuard.
+func (h *CCTVHandler) RegisterInternalRoutes(router fiber.Router) {
+	group := router.Group("/internal/cctv")
+	group.Get("/targets", h.GetHealthTargets)
+	group.Post("/health-sync", h.SyncCameraHealthStatuses)
+}
+
 type createCCTVInput struct {
 	Name           string  `json:"name"`
 	Location       string  `json:"location"`
@@ -71,6 +79,11 @@ func (h *CCTVHandler) CreateCCTV(c fiber.Ctx) error {
 		accessLevel = "STAFF_ONLY"
 	}
 
+	status := "ONLINE"
+	if strings.ToUpper(input.Status) == "OFFLINE" {
+		status = "OFFLINE"
+	}
+
 	cam := domain.CCTV{
 		ID:          uuid.New(),
 		Name:        input.Name,
@@ -78,6 +91,7 @@ func (h *CCTVHandler) CreateCCTV(c fiber.Ctx) error {
 		Latitude:    input.Latitude,
 		Longitude:   input.Longitude,
 		StreamURL:   input.StreamURL,
+		Status:      status,
 		AccessLevel: accessLevel,
 	}
 
@@ -298,6 +312,9 @@ func (h *CCTVHandler) CreateViewLog(c fiber.Ctx) error {
 
 	if err := h.useCase.RecordViewLog(input, adminID, clientIP, userAgent); err != nil {
 		log.Printf("[CCTV CreateViewLog] RecordViewLog returned error: %v", err)
+		if strings.Contains(strings.ToLower(err.Error()), "not found") || strings.Contains(strings.ToLower(err.Error()), "invalid") {
+			return ErrorResponse(c, err.Error(), fiber.StatusBadRequest)
+		}
 		return ErrorResponse(c, err.Error(), fiber.StatusInternalServerError)
 	}
 
@@ -400,6 +417,42 @@ func (h *CCTVHandler) CheckHealth(c fiber.Ctx) error {
 		"id":     idParam,
 		"status": status,
 	}, fiber.StatusOK)
+}
+
+func (h *CCTVHandler) GetHealthTargets(c fiber.Ctx) error {
+	targets, err := h.useCase.GetHealthTargets()
+	if err != nil {
+		return ErrorResponse(c, err.Error(), fiber.StatusInternalServerError)
+	}
+	return c.JSON(fiber.Map{
+		"success": true,
+		"count":   len(targets),
+		"items":   targets,
+	})
+}
+
+type cctvHealthSyncRequest struct {
+	Updates []domain.CCTVHealthUpdate `json:"updates"`
+}
+
+func (h *CCTVHandler) SyncCameraHealthStatuses(c fiber.Ctx) error {
+	var req cctvHealthSyncRequest
+	if err := c.Bind().JSON(&req); err != nil {
+		return ErrorResponse(c, "invalid request body", fiber.StatusBadRequest)
+	}
+	if len(req.Updates) > 5000 {
+		return ErrorResponse(c, "too many updates in single sync batch", fiber.StatusBadRequest)
+	}
+
+	updated, err := h.useCase.SyncCameraHealthStatuses(req.Updates)
+	if err != nil {
+		return ErrorResponse(c, err.Error(), fiber.StatusInternalServerError)
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"updated": updated,
+	})
 }
 
 
