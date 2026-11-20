@@ -293,6 +293,8 @@ func (u *publicRelationUseCase) Update(pr *domain.PublicRelation, adminID string
 }
 
 func (u *publicRelationUseCase) Delete(moduleId string, id string, adminID string) error {
+	existing, _ := u.repo.GetByID(moduleId, id)
+
 	err := u.repo.Delete(moduleId, id)
 	if err != nil {
 		return err
@@ -308,6 +310,21 @@ func (u *publicRelationUseCase) Delete(moduleId string, id string, adminID strin
 			})
 		}
 	}
+
+	if existing != nil && len(existing.Images) > 0 {
+		go func(images []domain.PublicRelationImage) {
+			for _, img := range images {
+				if img.Url != "" && !strings.HasPrefix(img.Url, "data:") {
+					if err := u.storageProvider.Delete(img.Url); err != nil {
+						log.Printf("⚠️ [MinIO-AsyncDelete] Warning: failed to delete PR image from storage (%s): %v", img.Url, err)
+					} else {
+						log.Printf("🧹 [MinIO-AsyncDelete] Successfully deleted PR image from storage: %s", img.Url)
+					}
+				}
+			}
+		}(existing.Images)
+	}
+
 	return nil
 }
 

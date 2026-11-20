@@ -275,11 +275,22 @@ func (r *publicRelationRepository) Update(pr *domain.PublicRelation) error {
 
 func (r *publicRelationRepository) Delete(moduleId string, id string) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
-
-		tx.Where("module_public_relation_id = ?", id).Delete(&domain.PublicRelationImage{})
-		tx.Where("module_public_relation_id = ?", id).Delete(&domain.PublicRelationComment{})
-		tx.Where("module_public_relation_id = ?", id).Delete(&domain.PublicRelationLike{})
-		tx.Where("module_public_relation_id = ?", id).Delete(&domain.PublicRelationVisitorCount{})
+		if err := tx.Where("module_public_relation_id = ?", id).Delete(&domain.PublicRelationImage{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("module_public_relation_id = ?", id).Delete(&domain.PublicRelationComment{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("module_public_relation_id = ?", id).Delete(&domain.PublicRelationLike{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("module_public_relation_id = ?", id).Delete(&domain.PublicRelationVisitorCount{}).Error; err != nil {
+			return err
+		}
+		// Unlink notifications referencing this news to prevent foreign key violation
+		if err := tx.Model(&domain.PublicRelationNotification{}).Where("public_relation_id = ?", id).Update("public_relation_id", nil).Error; err != nil {
+			return err
+		}
 		return tx.Where("module_id = ? AND id = ?", moduleId, id).Delete(&domain.PublicRelation{}).Error
 	})
 }
